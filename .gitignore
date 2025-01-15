@@ -175,3 +175,5 @@ data/dataset/*
 data/debug/*
 data/models/*
 data/samples/*
+
+test.ipynb

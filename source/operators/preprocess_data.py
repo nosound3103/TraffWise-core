@@ -9,6 +9,41 @@ from sklearn.model_selection import train_test_split
 from ultralytics import YOLO
 
 
+def split_yolo_data(data_path):
+    """Split YOLO dataset into train and validation sets
+
+    Args:
+        data_path (str): path to YOLO dataset
+    """
+
+    images_path = os.path.join(data_path, 'images')
+    labels_path = os.path.join(data_path, 'labels')
+
+    train_images_path = os.path.join(images_path, 'train')
+    val_images_path = os.path.join(images_path, 'val')
+    train_labels_path = os.path.join(labels_path, 'train')
+    val_labels_path = os.path.join(labels_path, 'val')
+
+    os.makedirs(train_images_path, exist_ok=True)
+    os.makedirs(val_images_path, exist_ok=True)
+    os.makedirs(train_labels_path, exist_ok=True)
+    os.makedirs(val_labels_path, exist_ok=True)
+
+    images = [f for f in os.listdir(images_path) if f.endswith('.jpg')]
+    labels = [f for f in os.listdir(labels_path) if f.endswith('.txt')]
+
+    train_images, val_images, train_labels, val_labels = train_test_split(
+        images, labels, test_size=0.2, random_state=42)
+
+    for img, lbl in zip(train_images, train_labels):
+        shutil.move(os.path.join(images_path, img), train_images_path)
+        shutil.move(os.path.join(labels_path, lbl), train_labels_path)
+
+    for img, lbl in zip(val_images, val_labels):
+        shutil.move(os.path.join(images_path, img), val_images_path)
+        shutil.move(os.path.join(labels_path, lbl), val_labels_path)
+
+
 def yolo_to_labelme(yolo_path, label_dict):
     """Convert YOLO dataset to LabelMe dataset with folder
 
@@ -62,16 +97,28 @@ def yolo_to_labelme_single(yolo_label_path, labelme_file, label_dict):
 
     annotations = []
     for line in lines:
-        label_idx, x_center, y_center, width, height = map(float, line.split())
-        label = label_dict[int(label_idx)]
-        xmin = int((x_center - width / 2) * img_width)
-        ymin = int((y_center - height / 2) * img_height)
-        xmax = int((x_center + width / 2) * img_width)
-        ymax = int((y_center + height / 2) * img_height)
+        data = list(map(float, line.split()))
+        if len(data) == 5:
+            label_idx, x_center, y_center, width, height = data
+            label = label_dict[int(label_idx)]
+            xmin = int((x_center - width / 2) * img_width)
+            ymin = int((y_center - height / 2) * img_height)
+            xmax = int((x_center + width / 2) * img_width)
+            ymax = int((y_center + height / 2) * img_height)
+
+            points = [[xmin, ymin], [xmin, ymax], [xmax, ymax], [xmax, ymin]]
+
+        else:
+            label_idx, *points = data
+            label = label_dict[int(label_idx)]
+            x_points = points[::2]
+            y_points = points[1::2]
+            points = [[int(x * img_width), int(y * img_height)]
+                      for x, y in zip(x_points, y_points)]
 
         annotation = {
             "label": label,
-            "points": [[xmin, ymin], [xmin, ymax], [xmax, ymax], [xmax, ymin]],
+            "points": points,
             "group_id": None,
             "shape_type": "polygon",
             "flags": {}
@@ -363,6 +410,42 @@ def merge_datasets(list_folders, output_folder):
 
                     shutil.copy(src_file, dest_file)
 
+
+def convert_segment_to_detect(label_path):
+    """Convert segmentation labels to detection labels
+
+    Args:
+        label_path (str): path to segmentation labels
+    """
+
+    label_files = glob.glob(os.path.join(label_path, "*", '*.txt'))
+    for label_file in label_files:
+        with open(label_file, 'r') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        for line in lines:
+            data = list(map(float, line.split()))
+            label_idx, *points = data
+            x_points = points[::2]
+            y_points = points[1::2]
+
+            xmin = min(x_points)
+            ymin = min(y_points)
+            xmax = max(x_points)
+            ymax = max(y_points)
+
+            x_center = ((xmin + xmax) / 2)
+            y_center = ((ymin + ymax) / 2)
+            width = (xmax - xmin)
+            height = (ymax - ymin)
+
+            new_lines.append(
+                f"{int(label_idx)} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}")
+
+        with open(label_file, 'w') as f:
+            f.write("\n".join(new_lines))
+
 # convert_pascal_voc_to_yolo(
 #     pascal_voc_path='data/dataset/raw/Pascal VOC 2012/VOC2012_train_val',
 #     yolo_path='data/dataset/labelme-yolo/pascal_voc')
@@ -393,7 +476,26 @@ def merge_datasets(list_folders, output_folder):
 merge_datasets(
     list_folders=[
         'data/dataset/labelme-yolo/pascal_voc',
-        'data/dataset/labelme-yolo/by9xs'
+        'data/dataset/labelme-yolo/by9xs',
+        "data/dataset/labelme-yolo/coco"
     ],
     output_folder='data/dataset/combination'
 )
+
+# split_yolo_data(
+#     data_path='data/dataset/labelme-yolo/coco'
+# )
+
+# convert_segment_to_detect(
+#     label_path='data/dataset/labelme-yolo/coco/labels'
+# )
+
+# yolo_to_labelme(
+#     yolo_path='data/dataset/labelme-yolo/coco',
+#     label_dict={
+#         0: 'bus',
+#         1: 'car',
+#         2: 'motorbike',
+#         3: 'truck'
+#     }
+# )
