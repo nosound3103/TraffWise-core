@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 import shutil
 import glob
 import json
+from tqdm import tqdm
 from PIL import Image
 from sklearn.model_selection import train_test_split
 from ultralytics import YOLO
@@ -35,11 +36,11 @@ def split_yolo_data(data_path):
     train_images, val_images, train_labels, val_labels = train_test_split(
         images, labels, test_size=0.2, random_state=42)
 
-    for img, lbl in zip(train_images, train_labels):
+    for img, lbl in tqdm(zip(train_images, train_labels)):
         shutil.move(os.path.join(images_path, img), train_images_path)
         shutil.move(os.path.join(labels_path, lbl), train_labels_path)
 
-    for img, lbl in zip(val_images, val_labels):
+    for img, lbl in tqdm(zip(val_images, val_labels)):
         shutil.move(os.path.join(images_path, img), val_images_path)
         shutil.move(os.path.join(labels_path, lbl), val_labels_path)
 
@@ -65,12 +66,12 @@ def yolo_to_labelme(yolo_path, label_dict):
     val_yolo_labels = glob.glob(os.path.join(
         yolo_path, 'labels', 'val', '*.txt'))
 
-    for label in train_yolo_labels:
+    for label in tqdm(train_yolo_labels):
         labelme_file = os.path.join(
             train_labelme_path, os.path.basename(label).replace('.txt', '.json'))
         yolo_to_labelme_single(label, labelme_file, label_dict)
 
-    for label in val_yolo_labels:
+    for label in tqdm(val_yolo_labels):
         labelme_file = os.path.join(
             val_labelme_path, os.path.basename(label).replace('.txt', '.json'))
         yolo_to_labelme_single(label, labelme_file, label_dict)
@@ -96,7 +97,7 @@ def yolo_to_labelme_single(yolo_label_path, labelme_file, label_dict):
         labelme_file), os.path.basename(img_path)))
 
     annotations = []
-    for line in lines:
+    for line in tqdm(lines):
         data = list(map(float, line.split()))
         if len(data) == 5:
             label_idx, x_center, y_center, width, height = data
@@ -139,6 +140,82 @@ def yolo_to_labelme_single(yolo_label_path, labelme_file, label_dict):
         json.dump(labelme_content, f)
 
 
+def labelme_to_yolo(labelme_path, yolo_path, label_dict):
+    """Convert LabelMe dataset to YOLO dataset
+
+    Args:
+        labelme_path (str): path to LabelMe dataset
+        yolo_path (str): path to YOLO dataset
+        label_dict (dict): label dictionary
+    """
+
+    yolo_img_path = os.path.join(yolo_path, 'images')
+    yolo_label_path = os.path.join(yolo_path, 'labels')
+    os.makedirs(yolo_img_path, exist_ok=True)
+    os.makedirs(yolo_label_path, exist_ok=True)
+
+    img_files = glob.glob(os.path.join(labelme_path, '*.jpg'))
+    for img_file in tqdm(img_files):
+        labelme_file = img_file.replace('.jpg', '.json')
+        yolo_label_file = os.path.join(
+            yolo_label_path, os.path.basename(labelme_file).replace('.json', '.txt'))
+        labelme_to_yolo_single(labelme_file, yolo_label_file, label_dict)
+
+
+def labelme_to_yolo_single(labelme_file, yolo_label_path, label_dict):
+    """Convert each LabelMe annotation file to YOLO annotation file
+
+    Args:
+        labelme_file (str): labelme file path
+        yolo_label_path (str): yolo label file path
+        label_dict (dict): label dictionary
+    """
+
+    with open(labelme_file, 'r') as f:
+        labelme_content = json.load(f)
+
+    img_path = labelme_file.replace('.json', '.jpg')
+    img_width, img_height = labelme_content['imageWidth'], labelme_content['imageHeight']
+
+    yolo_img_path = os.path.join(os.path.dirname(os.path.dirname(
+        yolo_label_path)), "images", os.path.basename(img_path))
+
+    shutil.copy(img_path, yolo_img_path)
+
+    annotations = labelme_content['shapes']
+    yolo_annotations = []
+    for annotation in tqdm(annotations):
+        label = annotation['label']
+        points = annotation['points']
+
+        if annotation['shape_type'] == 'polygon':
+            x_points = [x / img_width for x, _ in points]
+            y_points = [y / img_height for _, y in points]
+
+            xmin = min(x_points)
+            ymin = min(y_points)
+            xmax = max(x_points)
+            ymax = max(y_points)
+
+        elif annotation['shape_type'] == 'rectangle':
+            xmin, ymin = points[0]
+            xmax, ymax = points[1]
+
+        x_center = ((xmin + xmax) / 2) / img_width
+        y_center = ((ymin + ymax) / 2) / img_height
+
+        width = (xmax - xmin) / img_width
+        height = (ymax - ymin) / img_height
+
+        label_idx = int(label_dict[label])
+
+        yolo_annotations.append(
+            f"{label_idx} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}")
+
+    with open(yolo_label_path, 'w') as f:
+        f.write("\n".join(yolo_annotations))
+
+
 def create_yolo_annotation_with_xml(xml_file_path, yolo_label_path, label_dict):
     """Create YOLO annotation file from Pascal VOC XML file
 
@@ -155,12 +232,12 @@ def create_yolo_annotation_with_xml(xml_file_path, yolo_label_path, label_dict):
     img_width = int(root.find('size/width').text)
     img_height = int(root.find('size/height').text)
 
-    for obj in root.findall('object'):
+    for obj in tqdm(root.findall('object')):
         label = obj.find('name').text
         if label not in label_dict:
             return False
 
-        label_idx = label_dict[label]
+        label_idx = int(label_dict[label])
         bndbox = obj.find('bndbox')
         xmin = float(bndbox.find('xmin').text)
         ymin = float(bndbox.find('ymin').text)
@@ -223,7 +300,7 @@ def convert_pascal_voc_to_yolo(pascal_voc_path, yolo_path):
         'motorbike': 2
     }
 
-    for image_set, ids in [('train', train_ids), ('val', val_ids)]:
+    for image_set, ids in tqdm([('train', train_ids), ('val', val_ids)]):
         for img_id in ids:
             img_src_path = os.path.join(jpeg_images_dir, f'{img_id}.jpg')
             label_dst_path = os.path.join(
@@ -283,13 +360,13 @@ def convert_8_classes_dataset_to_yolo(data_path, yolo_path):
     train_images, test_images, train_labels, test_labels = train_test_split(
         images, labels, test_size=0.2, random_state=42)
 
-    for img, lbl in zip(train_images, train_labels):
+    for img, lbl in tqdm(zip(train_images, train_labels)):
         shutil.copy(os.path.join(image_path, img),
                     os.path.join(yolo_path, 'images/train', img))
         shutil.copy(os.path.join(label_path, lbl),
                     os.path.join(yolo_path, 'labels/train', lbl))
 
-    for img, lbl in zip(test_images, test_labels):
+    for img, lbl in tqdm(zip(test_images, test_labels)):
         shutil.copy(os.path.join(image_path, img),
                     os.path.join(yolo_path, 'images/val', img))
         shutil.copy(os.path.join(label_path, lbl),
@@ -333,13 +410,13 @@ def convert_by9xs_dataset_to_yolo(by9xs_path, yolo_path):
     train_images, test_images, train_labels, test_labels = train_test_split(
         images, labels, test_size=0.2, random_state=42)
 
-    for img, lbl in zip(train_images, train_labels):
+    for img, lbl in tqdm(zip(train_images, train_labels)):
         shutil.copy(os.path.join(image_path, img),
                     os.path.join(yolo_path, 'images/train', img))
         shutil.copy(os.path.join(label_path, lbl),
                     os.path.join(yolo_path, 'labels/train', lbl))
 
-    for img, lbl in zip(test_images, test_labels):
+    for img, lbl in tqdm(zip(test_images, test_labels)):
         shutil.copy(os.path.join(image_path, img),
                     os.path.join(yolo_path, 'images/val', img))
         shutil.copy(os.path.join(label_path, lbl),
@@ -357,6 +434,27 @@ def convert_by9xs_dataset_to_yolo(by9xs_path, yolo_path):
     yolo_to_labelme(yolo_path, label_dict_reverse)
 
 
+def process_daynight_dataset(daynight_path, yolo_path):
+    """Process daynight dataset
+
+    Args:
+        daynight_path (str): path to daynight dataset
+        yolo_path (str): path to YOLO dataset
+    """
+
+    os.makedirs(os.path.join(yolo_path, 'images'), exist_ok=True)
+    os.makedirs(os.path.join(yolo_path, 'labels'), exist_ok=True)
+
+    img_files = glob.glob(os.path.join(daynight_path, '*', '*', '*.jpg'))
+
+    for img_file in tqdm(img_files):
+        label_file = img_file.replace('.jpg', '.txt')
+        shutil.copy(img_file, os.path.join(
+            yolo_path, 'images', os.path.basename(img_file)))
+        shutil.copy(label_file, os.path.join(
+            yolo_path, 'labels', os.path.basename(label_file)))
+
+
 def merge_label_in_yolo_data(yolo_path, merge_dict):
     """Merge labels in YOLO dataset
 
@@ -365,14 +463,19 @@ def merge_label_in_yolo_data(yolo_path, merge_dict):
         label_dict (str): label dictionary
     """
     label_files = glob.glob(os.path.join(yolo_path, 'labels', '*.txt'))
-    for label_file in label_files:
+    for label_file in tqdm(label_files):
         with open(label_file, 'r') as f:
             lines = f.readlines()
-
         new_lines = []
         for line in lines:
-            label_idx, x_center, y_center, width, height = map(
-                float, line.split())
+            line = line.strip()
+
+            data = list(map(float, line.split()))
+
+            if len(data) == 0:
+                continue
+
+            label_idx, x_center, y_center, width, height = data
             label = merge_dict[int(label_idx)]
             new_lines.append(
                 f"{label} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}")
@@ -419,7 +522,7 @@ def convert_segment_to_detect(label_path):
     """
 
     label_files = glob.glob(os.path.join(label_path, "*", '*.txt'))
-    for label_file in label_files:
+    for label_file in tqdm(label_files):
         with open(label_file, 'r') as f:
             lines = f.readlines()
 
@@ -473,15 +576,6 @@ def convert_segment_to_detect(label_path):
 #     yolo_path='data/dataset/labelme-yolo/by9xs'
 # )
 
-merge_datasets(
-    list_folders=[
-        'data/dataset/labelme-yolo/pascal_voc',
-        'data/dataset/labelme-yolo/by9xs',
-        "data/dataset/labelme-yolo/coco"
-    ],
-    output_folder='data/dataset/combination'
-)
-
 # split_yolo_data(
 #     data_path='data/dataset/labelme-yolo/coco'
 # )
@@ -499,3 +593,60 @@ merge_datasets(
 #         3: 'truck'
 #     }
 # )
+
+# labelme_to_yolo(
+#     labelme_path='data/dataset/raw/xe_ba_gac',
+#     yolo_path='data/dataset/labelme-yolo/xe_ba_gac',
+#     label_dict={
+#         'bus': 0,
+#         'car': 1,
+#         'motorbike': 2,
+#         'truck': 3
+#     }
+# )
+
+# split_yolo_data(
+#     data_path='data/dataset/labelme-yolo/xe_ba_gac'
+# )
+
+# process_daynight_dataset(
+#     daynight_path='data/dataset/raw/Vietnamese Vehicles Dataset',
+#     yolo_path='data/dataset/labelme-yolo/daynight'
+# )
+
+# merge_label_in_yolo_data(
+#     yolo_path='data/dataset/labelme-yolo/daynight',
+#     merge_dict={
+#         0: 2,
+#         1: 1,
+#         2: 0,
+#         3: 3,
+#         4: 2,
+#         5: 1,
+#         6: 0,
+#         7: 3
+#     }
+# )
+
+# split_yolo_data(
+#     data_path='data/dataset/labelme-yolo/daynight'
+# )
+
+# yolo_to_labelme(
+#     yolo_path='data/dataset/labelme-yolo/daynight',
+#     label_dict={
+#         0: 'bus',
+#         1: 'car',
+#         2: 'motorbike',
+#         3: 'truck'
+#     }
+# )
+
+merge_datasets(
+    list_folders=[
+        'data/dataset/labelme-yolo/pascal_voc',
+        'data/dataset/labelme-yolo/by9xs',
+        "data/dataset/labelme-yolo/coco"
+    ],
+    output_folder='data/dataset/combination'
+)
