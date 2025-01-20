@@ -455,6 +455,29 @@ def process_daynight_dataset(daynight_path, yolo_path):
             yolo_path, 'labels', os.path.basename(label_file)))
 
 
+def process_v9i_dataset(v9i_path, yolo_path):
+    """Process V9I dataset
+
+    Args:
+        v9i_path (str): path to V9I dataset
+        yolo_path (str): path to YOLO dataset
+    """
+
+    os.makedirs(os.path.join(yolo_path, 'images'), exist_ok=True)
+    os.makedirs(os.path.join(yolo_path, 'labels'), exist_ok=True)
+
+    img_files = glob.glob(os.path.join(v9i_path, 'train', '*', '*.jpg')) + \
+        glob.glob(os.path.join(v9i_path, 'val', '*', '*.jpg'))
+
+    for img_file in tqdm(img_files):
+        label_file = img_file.replace(
+            '.jpg', '.txt').replace('images', 'labels')
+        shutil.copy(img_file, os.path.join(
+            yolo_path, 'images', os.path.basename(img_file)))
+        shutil.copy(label_file, os.path.join(
+            yolo_path, 'labels', os.path.basename(label_file)))
+
+
 def merge_label_in_yolo_data(yolo_path, merge_dict):
     """Merge labels in YOLO dataset
 
@@ -549,16 +572,20 @@ def convert_segment_to_detect(label_path):
         with open(label_file, 'w') as f:
             f.write("\n".join(new_lines))
 
+
+# Pascal VOC
 # convert_pascal_voc_to_yolo(
 #     pascal_voc_path='data/dataset/raw/Pascal VOC 2012/VOC2012_train_val',
 #     yolo_path='data/dataset/labelme-yolo/pascal_voc')
 
 
+# Vehicle detection 8 classes
 # convert_8_classes_dataset_to_yolo(
 #     data_path='data/dataset/raw/Vehicle detection 8 classes/train',
 #     yolo_path='data/dataset/labelme-yolo/8-classes')
 
 
+# BY9XS
 # merge_label_in_yolo_data(
 #     yolo_path='data/dataset/raw/vehicle-detection-by9xs/train',
 #     merge_dict={
@@ -570,20 +597,19 @@ def convert_segment_to_detect(label_path):
 #         5: 3,
 #     }
 # )
-
 # convert_by9xs_dataset_to_yolo(
 #     by9xs_path='data/dataset/raw/vehicle-detection-by9xs/train',
 #     yolo_path='data/dataset/labelme-yolo/by9xs'
 # )
 
+
+# Coco
 # split_yolo_data(
 #     data_path='data/dataset/labelme-yolo/coco'
 # )
-
 # convert_segment_to_detect(
 #     label_path='data/dataset/labelme-yolo/coco/labels'
 # )
-
 # yolo_to_labelme(
 #     yolo_path='data/dataset/labelme-yolo/coco',
 #     label_dict={
@@ -594,6 +620,8 @@ def convert_segment_to_detect(label_path):
 #     }
 # )
 
+
+# Xe ba gác
 # labelme_to_yolo(
 #     labelme_path='data/dataset/raw/xe_ba_gac',
 #     yolo_path='data/dataset/labelme-yolo/xe_ba_gac',
@@ -604,16 +632,16 @@ def convert_segment_to_detect(label_path):
 #         'truck': 3
 #     }
 # )
-
 # split_yolo_data(
 #     data_path='data/dataset/labelme-yolo/xe_ba_gac'
 # )
 
+
+# daynight
 # process_daynight_dataset(
 #     daynight_path='data/dataset/raw/Vietnamese Vehicles Dataset',
 #     yolo_path='data/dataset/labelme-yolo/daynight'
 # )
-
 # merge_label_in_yolo_data(
 #     yolo_path='data/dataset/labelme-yolo/daynight',
 #     merge_dict={
@@ -627,11 +655,9 @@ def convert_segment_to_detect(label_path):
 #         7: 3
 #     }
 # )
-
 # split_yolo_data(
 #     data_path='data/dataset/labelme-yolo/daynight'
 # )
-
 # yolo_to_labelme(
 #     yolo_path='data/dataset/labelme-yolo/daynight',
 #     label_dict={
@@ -642,11 +668,31 @@ def convert_segment_to_detect(label_path):
 #     }
 # )
 
-merge_datasets(
-    list_folders=[
-        'data/dataset/labelme-yolo/pascal_voc',
-        'data/dataset/labelme-yolo/by9xs',
-        "data/dataset/labelme-yolo/coco"
-    ],
-    output_folder='data/dataset/combination'
-)
+
+# V9I
+# process_v9i_dataset(
+#     v9i_path='data/dataset/raw/vehicle detection.v9i',
+#     yolo_path='data/dataset/labelme-yolo/v9i'
+# )
+# yolo_to_labelme(
+#     yolo_path='data/dataset/labelme-yolo/v9i',
+#     label_dict={
+#         0: 'bus',
+#         1: 'car',
+#         2: 'motorbike',
+#         3: 'truck'
+#     }
+# )
+
+
+# merge_datasets(
+#     list_folders=[
+#         'data/dataset/labelme-yolo/pascal_voc',
+#         'data/dataset/labelme-yolo/by9xs',
+#         'data/dataset/labelme-yolo/xe_ba_gac',
+#         'data/dataset/labelme-yolo/daynight',
+#         'data/dataset/labelme-yolo/v9i',
+#         'data/dataset/labelme-yolo/coco'
+#     ],
+#     output_folder='data/dataset/combination'
+# )

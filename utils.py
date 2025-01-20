@@ -33,32 +33,34 @@ def detect_objects_with_video(video_path,
             break
 
         result = model(frame, imgsz=640, verbose=False)[0]
+        print(result.boxes.cls.cpu().numpy())
+        break
 
-        for box in result.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy.cpu().numpy()[0])
-            label = result.names[int(box.cls.cpu().numpy()[0])]
-            confidence = box.conf.cpu().numpy()[0]
+    #     for box in result.boxes:
+    #         x1, y1, x2, y2 = map(int, box.xyxy.cpu().numpy()[0])
+    #         label = result.names[int(box.cls.cpu().numpy()[0])]
+    #         confidence = box.conf.cpu().numpy()[0]
 
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-            label_text = f"{label}: {confidence:.2f}"
-            cv2.putText(frame, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, (0, 255, 0), 2)
+    #         label_text = f"{label}: {confidence:.2f}"
+    #         cv2.putText(frame, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
+    #                     0.5, (0, 255, 0), 2)
 
-        resized_frame = cv2.resize(frame, frame_size)
+    #     resized_frame = cv2.resize(frame, frame_size)
 
-        out.write(resized_frame)
+    #     out.write(resized_frame)
 
-        cv2.imshow("Video Frame", resized_frame)
+    #     cv2.imshow("Video Frame", resized_frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+    #     if cv2.waitKey(1) & 0xFF == ord('q'):
+    #         break
 
-    cap.release()
-    out.release()
-    cv2.destroyAllWindows()
+    # cap.release()
+    # out.release()
+    # cv2.destroyAllWindows()
 
-    print(f"Video saved as {output_result_path}")
+    # print(f"Video saved as {output_result_path}")
 
 
 def detect_objects_and_speed_with_video(video_path,

@@ -1,0 +1,32 @@
+models:
+  yolo11:
+    path: data/models/one-stage/yolo11-enhance.pt
+  detr:
+    path: data/models/transformer-based/detr-r50.pt
+  faster_rcnn:
+    path: data/models/two-stage/faster-rcnn.pt
+
+samples:
+  speed_test:
+    video_path: data/samples/videos/speed_test.mp4
+    output_path: data/debug/speed_test.mp4
+    annotation_path: data/samples/annotations/speed_test.json
+  red_light_violation_test:
+    video_path: data/samples/videos/red_light_violation_test.mp4
+    output_path: data/debug/red_light_violation_test.mp4
+    annotation_path: data/samples/annotations/red_light_violation_test.json
+  camera_1_night:
+    video_path: data/samples/videos/Traffic Camera VN 1.mp4
+    output_path: data/debug/Traffic Camera VN 1.mp4
+  camera_2_night:
+    video_path: data/samples/videos/Traffic Camera VN 2.mp4
+    output_path: data/debug/Traffic Camera VN 2.mp4
+  camera_1_day:
+    video_path: data/samples/videos/Traffic Camera VN 3.mp4
+    output_path: data/debug/Traffic Camera VN 3.mp4
+  camera_2_day:
+    video_path: data/samples/videos/Traffic Camera VN 4.mp4
+    output_path: data/debug/Traffic Camera VN 4.mp4
+  camera_3_night:
+    video_path: data/samples/videos/Traffic Camera VN 5.mp4
+    output_path: data/debug/Traffic Camera VN 5.mp4
