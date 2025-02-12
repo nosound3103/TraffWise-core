@@ -1,3 +1,4 @@
+import os
 from ultralytics import YOLO, RTDETR
 from typing import Literal
 
@@ -14,9 +15,6 @@ class VehicleDetector:
         # elif model_type == "faster_rcnn":
         #     self.model = FasterRCNN(self.config[model_type]["path"])
 
-    def output_video(self, video_path, output_path):
-        pass
-
     def preprocess_image(self, image):
         # Preprocess image
         pass
@@ -25,12 +23,12 @@ class VehicleDetector:
         # Postprocess
         if self.model_type in ["yolo11", "detr"]:
             confs = predictions[0].boxes.conf.cpu().numpy()
-            clss = predictions[0].boxes.cls.cpu().numpy()
+            labels = predictions[0].boxes.cls.cpu().numpy()
             boxes = predictions[0].boxes.xyxy.cpu().numpy()
             boxes = [[int(value) for value in box] for box in boxes]
 
-            res = [[cls, conf, box]
-                   for cls, conf, box in zip(clss, confs, boxes)]
+            res = [[label, conf, box]
+                   for label, conf, box in zip(labels, confs, boxes)]
 
         elif self.model_type == "FasterRCNN":
             pass

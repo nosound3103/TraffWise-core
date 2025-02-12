@@ -507,13 +507,15 @@ def merge_label_in_yolo_data(yolo_path, merge_dict):
             f.write("\n".join(new_lines))
 
 
-def merge_datasets(list_folders, output_folder):
+def merge_datasets(list_folders, output_folder, amounts=[]):
     """Merge multiple datasets into one
 
     Args:
         list_folders (list): list of folders to merge
         output_folder (str): output folder
     """
+    if len(amounts) == 0:
+        amounts = [1] * len(list_folders)
 
     subfolders = ['images/train', 'images/val', 'labels/train', 'labels/val']
 
@@ -525,7 +527,13 @@ def merge_datasets(list_folders, output_folder):
             src = os.path.join(source, subfolder)
 
             if os.path.exists(src):
-                for file_name in os.listdir(src):
+                list_files = os.listdir(src)
+                amount = int(amounts[idx] * len(list_files))
+                random.seed(42)
+                random.shuffle(list_files)
+                list_files = list_files[:amount]
+
+                for file_name in list_files:
                     src_file = os.path.join(src, file_name)
                     dest_file = os.path.join(dest, file_name)
 
@@ -573,11 +581,33 @@ def convert_segment_to_detect(label_path):
             f.write("\n".join(new_lines))
 
 
+def clear_non_label_in_yolo(yolo_path):
+    """Clear non label files in YOLO dataset
+
+    Args:
+        yolo_path (str): path to YOLO dataset
+    """
+    count = 0
+    label_files = glob.glob(os.path.join(yolo_path, 'labels', '*', '*.txt'))
+    for label_file in tqdm(label_files):
+        with open(label_file, 'r') as f:
+            lines = f.readlines()
+
+        if len(lines) == 0:
+            os.remove(label_file)
+            img_file = label_file.replace(
+                'labels', 'images').replace('.txt', '.jpg')
+            os.remove(img_file)
+            count += 1
+
+    print(f"Removed {count} non-label files. {yolo_path}")
+
+
 # Pascal VOC
 # convert_pascal_voc_to_yolo(
 #     pascal_voc_path='data/dataset/raw/Pascal VOC 2012/VOC2012_train_val',
 #     yolo_path='data/dataset/labelme-yolo/pascal_voc')
-
+# clear_non_label_in_yolo('data/dataset/labelme-yolo/pascal_voc')
 
 # Vehicle detection 8 classes
 # convert_8_classes_dataset_to_yolo(
@@ -601,7 +631,7 @@ def convert_segment_to_detect(label_path):
 #     by9xs_path='data/dataset/raw/vehicle-detection-by9xs/train',
 #     yolo_path='data/dataset/labelme-yolo/by9xs'
 # )
-
+# clear_non_label_in_yolo('data/dataset/labelme-yolo/by9xs')
 
 # Coco
 # split_yolo_data(
@@ -620,7 +650,6 @@ def convert_segment_to_detect(label_path):
 #     }
 # )
 
-
 # Xe ba gác
 # labelme_to_yolo(
 #     labelme_path='data/dataset/raw/xe_ba_gac',
@@ -635,7 +664,7 @@ def convert_segment_to_detect(label_path):
 # split_yolo_data(
 #     data_path='data/dataset/labelme-yolo/xe_ba_gac'
 # )
-
+# clear_non_label_in_yolo('data/dataset/labelme-yolo/xe_ba_gac')
 
 # daynight
 # process_daynight_dataset(
@@ -667,12 +696,15 @@ def convert_segment_to_detect(label_path):
 #         3: 'truck'
 #     }
 # )
-
+# clear_non_label_in_yolo('data/dataset/labelme-yolo/daynight')
 
 # V9I
 # process_v9i_dataset(
 #     v9i_path='data/dataset/raw/vehicle detection.v9i',
 #     yolo_path='data/dataset/labelme-yolo/v9i'
+# )
+# split_yolo_data(
+#     data_path='data/dataset/labelme-yolo/v9i'
 # )
 # yolo_to_labelme(
 #     yolo_path='data/dataset/labelme-yolo/v9i',
@@ -683,16 +715,37 @@ def convert_segment_to_detect(label_path):
 #         3: 'truck'
 #     }
 # )
+# clear_non_label_in_yolo('data/dataset/labelme-yolo/v9i')
 
+random.seed(42)
 
 # merge_datasets(
 #     list_folders=[
-#         'data/dataset/labelme-yolo/pascal_voc',
 #         'data/dataset/labelme-yolo/by9xs',
 #         'data/dataset/labelme-yolo/xe_ba_gac',
 #         'data/dataset/labelme-yolo/daynight',
 #         'data/dataset/labelme-yolo/v9i',
-#         'data/dataset/labelme-yolo/coco'
 #     ],
 #     output_folder='data/dataset/combination'
 # )
+
+# merge_datasets(
+#     list_folders=[
+#         'data/dataset/labelme-yolo/by9xs',
+#         'data/dataset/labelme-yolo/xe_ba_gac',
+#         'data/dataset/labelme-yolo/daynight',
+#         'data/dataset/labelme-yolo/v9i',
+#     ],
+#     output_folder='data/dataset/combination-lite',
+#     amounts=[0.33, 1, 0.33, 0.33]
+# )
+
+merge_datasets(
+    list_folders=[
+        'data/dataset/labelme-yolo/xe_ba_gac',
+        'data/dataset/labelme-yolo/coco',
+        'data/dataset/labelme-yolo/pascal_voc',
+    ],
+    output_folder='data/dataset/coco-v2',
+    amounts=[1, 1, 1]
+)

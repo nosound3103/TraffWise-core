@@ -1,39 +1,92 @@
-import math
+import cv2
+import numpy as np
+import yaml
+from deep_sort_realtime.deepsort_tracker import DeepSort
+
+
+class ViewTransformer:
+    def __init__(self, source, target):
+        source = source.astype(np.float32)
+        target = target.astype(np.float32)
+        self.matrix = cv2.getPerspectiveTransform(source, target)
+
+    def transform_points(self, points):
+        if points.size == 0:
+            return points
+
+        reshaped_points = points.reshape(-1, 1, 2).astype(np.float32)
+        transformed_points = cv2.perspectiveTransform(
+            reshaped_points, self.matrix)
+
+        return transformed_points.reshape(-1, 2)
 
 
 class Tracker:
-    def __init__(self):
-        self.center_points = {}
-        self.id_count = 0
+    def __init__(self,
+                 config,
+                 camera_name,
+                 max_age=15):
 
-    def update(self, objects_rect):
-        objects_bbs_ids = []
+        self.config = config
+        self.annotation_path = self.config["samples"][camera_name]["annotation_path"]
+        self.read_annotation()
 
-        for rect in objects_rect:
-            x, y, w, h = rect
-            cx = (x + x + w) // 2
-            cy = (y + y + h) // 2
+        self.view_transformer = ViewTransformer(self.SOURCE, self.TARGET)
 
-            same_object_detected = False
-            for id, pt in self.center_points.items():
-                dist = math.hypot(cx - pt[0], cy - pt[1])
+        self.deep_sort = DeepSort(max_age=max_age)
 
-                if dist < 35:
-                    self.center_points[id] = (cx, cy)
-                    objects_bbs_ids.append([x, y, w, h, id])
-                    same_object_detected = True
-                    break
+        self.class_names = list(config["labels"].keys())
 
-            if same_object_detected is False:
-                self.center_points[self.id_count] = (cx, cy)
-                objects_bbs_ids.append([x, y, w, h, self.id_count])
-                self.id_count += 1
+        self.colors = np.random.randint(
+            0, 255, size=(len(self.class_names), 3))
 
-        new_center_points = {}
-        for obj_bb_id in objects_bbs_ids:
-            _, _, _, _, object_id = obj_bb_id
-            center = self.center_points[object_id]
-            new_center_points[object_id] = center
+    def read_annotation(self):
+        """ Read annotation file """
 
-        self.center_points = new_center_points.copy()
-        return objects_bbs_ids
+        with open(self.annotation_path, "r") as file:
+            self.data = yaml.safe_load(file)
+
+        self.SOURCE = np.array(self.data["SOURCE"]["box"])
+        self.TARGET = np.array(self.data["TARGET"]["box"])
+
+    def convert_box(self, box):
+        x1, y1, x2, y2 = box
+        return [x1, y1, x2 - x1, y2 - y1]
+
+    def extract_detections(self, boxes, conf_threshold=0.5):
+        detections = [
+            [self.convert_box(box),
+             conf,
+             label]
+            for [label, conf, box] in boxes if conf > conf_threshold]
+
+        return detections
+
+    def draw_tracks(self, frame, tracks, speed_estimator):
+        for track in tracks:
+            if not track.is_confirmed():
+                continue
+
+            track_id = track.track_id
+            ltrb = track.to_ltrb()
+            class_id = int(track.get_det_class())
+
+            x1, y1, x2, y2 = map(int, ltrb)
+            color = self.colors[class_id]
+            B, G, R = map(int, color)
+            label = f"{self.class_names[class_id]}-{track_id}"
+
+            x_center = (ltrb[0] + ltrb[2]) / 2
+            y_center = ltrb[3]
+
+            transformed_point = self.view_transformer.transform_points(
+                np.array([[x_center, y_center]]))[0]
+
+            speed_estimator.update_coordinates(
+                track_id, transformed_point)
+            speed = speed_estimator.calculate_speed(track_id)
+
+            label += f" {int(speed)} km/h"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
+            cv2.putText(frame, label, (x1 + 5, y1 - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
