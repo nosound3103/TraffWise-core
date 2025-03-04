@@ -21,7 +21,7 @@ class ViewTransformer:
         return transformed_points.reshape(-1, 2)
 
 
-class Tracker:
+class DeepSORT:
     def __init__(self,
                  config,
                  camera_name,
@@ -33,12 +33,10 @@ class Tracker:
 
         self.view_transformer = ViewTransformer(self.SOURCE, self.TARGET)
 
-        self.deep_sort = DeepSort(max_age=max_age)
+        self.tracker = DeepSort(
+            max_age=max_age, max_iou_distance=0.90, n_init=2)
 
         self.class_names = list(config["labels"].keys())
-
-        self.colors = np.random.randint(
-            0, 255, size=(len(self.class_names), 3))
 
     def read_annotation(self):
         """ Read annotation file """
@@ -62,31 +60,5 @@ class Tracker:
 
         return detections
 
-    def draw_tracks(self, frame, tracks, speed_estimator):
-        for track in tracks:
-            if not track.is_confirmed():
-                continue
-
-            track_id = track.track_id
-            ltrb = track.to_ltrb()
-            class_id = int(track.get_det_class())
-
-            x1, y1, x2, y2 = map(int, ltrb)
-            color = self.colors[class_id]
-            B, G, R = map(int, color)
-            label = f"{self.class_names[class_id]}-{track_id}"
-
-            x_center = (ltrb[0] + ltrb[2]) / 2
-            y_center = ltrb[3]
-
-            transformed_point = self.view_transformer.transform_points(
-                np.array([[x_center, y_center]]))[0]
-
-            speed_estimator.update_coordinates(
-                track_id, transformed_point)
-            speed = speed_estimator.calculate_speed(track_id)
-
-            label += f" {int(speed)} km/h"
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
-            cv2.putText(frame, label, (x1 + 5, y1 - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
+    def update_tracks(self, detections, frame):
+        return self.tracker.update_tracks(detections, frame=frame)

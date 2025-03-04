@@ -3,11 +3,12 @@ import random
 import xml.etree.ElementTree as ET
 import shutil
 import glob
+import cv2
 import json
 from tqdm import tqdm
 from PIL import Image
 from sklearn.model_selection import train_test_split
-from ultralytics import YOLO
+from ultralytics import YOLO, RTDETR
 
 
 def split_yolo_data(data_path):
@@ -97,7 +98,7 @@ def yolo_to_labelme_single(yolo_label_path, labelme_file, label_dict):
         labelme_file), os.path.basename(img_path)))
 
     annotations = []
-    for line in tqdm(lines):
+    for line in lines:
         data = list(map(float, line.split()))
         if len(data) == 5:
             label_idx, x_center, y_center, width, height = data
@@ -184,7 +185,7 @@ def labelme_to_yolo_single(labelme_file, yolo_label_path, label_dict):
 
     annotations = labelme_content['shapes']
     yolo_annotations = []
-    for annotation in tqdm(annotations):
+    for annotation in annotations:
         label = annotation['label']
         points = annotation['points']
 
@@ -478,6 +479,58 @@ def process_v9i_dataset(v9i_path, yolo_path):
             yolo_path, 'labels', os.path.basename(label_file)))
 
 
+def process_traffic_dataset(traffic_ds_path, yolo_path):
+    """Process traffic dataset
+
+    Args:
+        traffic_ds_path (str): path to traffic dataset
+        yolo_path (str): path to YOLO dataset
+    """
+    def convert_label(images, type="train"):
+        for img_file in tqdm(images):
+            label_file = img_file.replace(
+                'images', 'labels').replace('.jpg', '.txt')
+            shutil.copy(img_file, os.path.join(
+                yolo_path, 'images', type, os.path.basename(img_file)))
+
+            with open(label_file, 'r') as f:
+                lines = f.readlines()
+
+            new_label_path = os.path.join(
+                yolo_path, 'labels', type, os.path.basename(label_file))
+
+            with open((new_label_path), 'w') as f:
+                new_lines = []
+                for line in lines:
+                    data = list(map(float, line.split()))
+                    label = int(data[0])
+                    if label not in convert_dict.keys():
+                        continue
+                    label = convert_dict[label]
+                    new_lines.append(f"{label} {' '.join(map(str, data[1:]))}")
+                f.write("\n".join(new_lines))
+
+    convert_dict = {
+        0: 1,
+        3: 2,
+        5: 0,
+        6: 3
+    }
+
+    os.makedirs(os.path.join(yolo_path, 'images/train'), exist_ok=True)
+    os.makedirs(os.path.join(yolo_path, 'labels/train'), exist_ok=True)
+    os.makedirs(os.path.join(yolo_path, 'images/val'), exist_ok=True)
+    os.makedirs(os.path.join(yolo_path, 'labels/val'), exist_ok=True)
+
+    train_images = glob.glob(os.path.join(
+        traffic_ds_path, 'images', 'train', '*.jpg'))
+    val_images = glob.glob(os.path.join(
+        traffic_ds_path, 'images', 'val', '*.jpg'))
+
+    convert_label(train_images, "train")
+    convert_label(val_images, "val")
+
+
 def merge_label_in_yolo_data(yolo_path, merge_dict):
     """Merge labels in YOLO dataset
 
@@ -603,6 +656,108 @@ def clear_non_label_in_yolo(yolo_path):
     print(f"Removed {count} non-label files. {yolo_path}")
 
 
+def model_predictions_to_labelme(
+        model_path,
+        video_path,
+        output_path,
+        label_dict={
+            0: 'bus',
+            1: 'car',
+            2: 'motorbike',
+            3: 'truck'
+        }):
+    """Convert model predictions to LabelMe format
+
+    Args:
+        model_path (str): path to model
+        video_path (str): path to video
+        output_path (str): path to output folder
+    """
+
+    yolo = RTDETR(model_path)
+
+    os.makedirs(output_path, exist_ok=True)
+
+    cap = cv2.VideoCapture(video_path)
+    frame_id = 0
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # if frame_id % 60 != 0:
+        #     frame_id += 1
+        #     continue
+
+        results = yolo.predict(frame, conf=0.5)[0]
+        class_ids = results.boxes.cls.cpu().numpy()
+        boxes = results.boxes.xyxy.cpu().numpy()
+
+        annotations = []
+        for class_id, box in zip(class_ids, boxes):
+            xmin, ymin, xmax, ymax = map(float, box)
+            points = [[xmin, ymin], [xmax, ymax]]
+            annotation = {
+                "label": label_dict[int(class_id)],
+                "points": points,
+                "group_id": None,
+                "shape_type": "rectangle",
+                "flags": {}
+            }
+            annotations.append(annotation)
+
+        labelme_content = {
+            "version": "5.6.0",
+            "flags": {},
+            "shapes": annotations,
+            "imagePath": f"frame_{frame_id}.jpg",
+            "imageData": None,
+            "imageHeight": frame.shape[0],
+            "imageWidth": frame.shape[1]
+        }
+
+        frame_output_path = os.path.join(output_path, f"frame_{frame_id}.jpg")
+        json_output_path = os.path.join(output_path, f"frame_{frame_id}.json")
+
+        cv2.imwrite(frame_output_path, frame)
+        with open(json_output_path, 'w') as f:
+            json.dump(labelme_content, f)
+
+        frame_id += 1
+
+    cap.release()
+
+
+def calculate_num_labels(
+        annotation_path,
+        label_dict={
+            0: 'bus',
+            1: 'car',
+            2: 'motorbike',
+            3: 'truck'
+        }):
+    """Calculate number of labels in annotation files
+
+    Args:
+        annotation_path (str): path to annotation files
+    """
+    label_counts = {label: 0 for label in label_dict.values()}
+    label_counts["total"] = 0
+
+    label_files = glob.glob(os.path.join(annotation_path, '*', '*.txt'))
+    for label_file in tqdm(label_files):
+        with open(label_file, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                data = list(map(float, line.split()))
+                label = label_dict[int(data[0])]
+                label_counts[label] += 1
+                label_counts["total"] += 1
+
+    return label_counts
+
+
 # Pascal VOC
 # convert_pascal_voc_to_yolo(
 #     pascal_voc_path='data/dataset/raw/Pascal VOC 2012/VOC2012_train_val',
@@ -717,35 +872,83 @@ def clear_non_label_in_yolo(yolo_path):
 # )
 # clear_non_label_in_yolo('data/dataset/labelme-yolo/v9i')
 
+# Traffic Dataset
+# process_traffic_dataset(
+#     traffic_ds_path='data/dataset/raw/Traffic Dataset',
+#     yolo_path='data/dataset/labelme-yolo/Traffic Dataset'
+# )
+
+# clear_non_label_in_yolo(
+#     'data/dataset/labelme-yolo/Traffic Dataset'
+# )
+
+# yolo_to_labelme(
+#     yolo_path='data/dataset/labelme-yolo/Traffic Dataset',
+#     label_dict={
+#         0: 'bus',
+#         1: 'car',
+#         2: 'motorbike',
+#         3: 'truck'
+#     }
+# )
+
 random.seed(42)
 
 # merge_datasets(
 #     list_folders=[
 #         'data/dataset/labelme-yolo/by9xs',
 #         'data/dataset/labelme-yolo/xe_ba_gac',
-#         'data/dataset/labelme-yolo/daynight',
 #         'data/dataset/labelme-yolo/v9i',
+#         'data/dataset/labelme-yolo/predictions',
 #     ],
 #     output_folder='data/dataset/combination'
 # )
+
+clear_non_label_in_yolo('data/dataset/combination')
 
 # merge_datasets(
 #     list_folders=[
 #         'data/dataset/labelme-yolo/by9xs',
 #         'data/dataset/labelme-yolo/xe_ba_gac',
-#         'data/dataset/labelme-yolo/daynight',
 #         'data/dataset/labelme-yolo/v9i',
+#         'data/dataset/labelme-yolo/predictions',
 #     ],
 #     output_folder='data/dataset/combination-lite',
 #     amounts=[0.33, 1, 0.33, 0.33]
 # )
 
-merge_datasets(
-    list_folders=[
-        'data/dataset/labelme-yolo/xe_ba_gac',
-        'data/dataset/labelme-yolo/coco',
-        'data/dataset/labelme-yolo/pascal_voc',
-    ],
-    output_folder='data/dataset/coco-v2',
-    amounts=[1, 1, 1]
-)
+# merge_datasets(
+#     list_folders=[
+#         'data/dataset/labelme-yolo/xe_ba_gac',
+#         'data/dataset/labelme-yolo/coco',
+#         'data/dataset/labelme-yolo/pascal_voc',
+#     ],
+#     output_folder='data/dataset/coco-v2',
+#     amounts=[1, 1, 1]
+# )
+
+# model_predictions_to_labelme(
+#     model_path='rtdetr-l.pt',
+#     video_path='data/samples/videos/Traffic Camera 1.mp4',
+#     output_path='data/dataset/labelme-yolo/predictions_1'
+# )
+
+
+# print(calculate_num_labels(
+#     'data/dataset/combination/labels'
+# ))
+
+# labelme_to_yolo(
+#     labelme_path='data/dataset/labelme-yolo/predictions/labelme',
+#     yolo_path='data/dataset/labelme-yolo/predictions',
+#     label_dict={
+#         'bus': 0,
+#         'car': 1,
+#         'motorbike': 2,
+#         'truck': 3
+#     }
+# )
+
+# split_yolo_data(
+#     data_path="data/dataset/labelme-yolo/predictions"
+# )

@@ -41,7 +41,7 @@ class VehicleDetector:
             image = self.preprocess_image(image, imgsz=640)
 
         # Predict
-        predictions = self.model.predict(image)
+        predictions = self.model.predict(image, conf=0.5, verbose=False)
 
         # Postprocess
         res = self.postprocess(predictions)

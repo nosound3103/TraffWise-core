@@ -4,9 +4,15 @@ labels:
   motorbike: 2
   truck: 3
 
+frame_skipper:
+  initial_skip: 2
+  target_fps: 25
+  max_skip_frames: 0
+  adjustment_speed: 0.3
+
 models:
   yolo11:
-    path: data/models/one-stage/best.pt
+    path: data/models/one-stage/yolo11-newdata.pt
   detr:
     path: data/models/transformer-based/detr-r50.pt
   faster_rcnn:

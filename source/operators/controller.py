@@ -1,9 +1,12 @@
 import cv2
+import time
 import numpy as np
 from typing import Literal, Dict
 
-from ..engines import VehicleDetector, Tracker, \
+from .adaptive_frame_skipper import AdaptiveFrameSkipper
+from ..engines import VehicleDetector, DeepSORT, \
     RedLightViolationDetector, SpeedEstimator
+from ..process import AsyncCloudinaryUploader
 
 
 class Controller:
@@ -20,51 +23,83 @@ class Controller:
                          "camera_1_day",
                          "camera_2_day"] = "red_light_violation_test"):
         self.config = config
+        self.class_names = list(config["labels"].keys())
+        self.colors = [
+            (255, 255, 0),
+            (0, 255, 255),
+            (255, 0, 255),
+            (192, 192, 192)
+        ]
         self.camera_name = camera_name
+        self.frame_skipper = AdaptiveFrameSkipper(config["frame_skipper"])
+        self.uploader = AsyncCloudinaryUploader()
+
         self.vehicle_detector = VehicleDetector(config["models"])
-        self.tracker = Tracker(
+        self.tracker = DeepSORT(
             config, self.camera_name)
         self.rlv_detector = RedLightViolationDetector(
             config, self.camera_name)
         self.speed_estimator = SpeedEstimator()
 
-    def process_frame(self, frame, features: Dict[str, bool] = {
-            "speed_estimation": True,
-            "red_light_violation_detection": True,
-            "wrong_lane_driving_detection": True,
-    }):
+    def draw_tracks(self, frame, rl_violation_log):
+        for vehicle_violation in rl_violation_log:
+            track = vehicle_violation["track"]
+            violation_flag = vehicle_violation["violation_type"]
+
+            if not track.is_confirmed():
+                continue
+
+            track_id = track.track_id
+            ltrb = track.to_ltrb()
+            class_id = int(track.get_det_class())
+
+            x1, y1, x2, y2 = map(int, ltrb)
+            color = self.colors[class_id] if not violation_flag else (
+                0, 0, 255)
+            B, G, R = map(int, color)
+            label = f"{self.class_names[class_id]}-{track_id}"
+
+            x_center = (ltrb[0] + ltrb[2]) / 2
+            y_center = ltrb[3]
+
+            transformed_point = self.tracker.view_transformer.transform_points(
+                np.array([[x_center, y_center]]))[0]
+
+            self.speed_estimator.update_coordinates(
+                track_id, transformed_point)
+            speed = self.speed_estimator.calculate_speed(track_id)
+
+            rl_v = "RLV" if violation_flag else "No RLV"
+            if violation_flag:
+                self.uploader.upload_violation(frame)
+
+            label = f"{self.class_names[class_id]}-{track_id}-{rl_v}-{int(speed)} km/h"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
+            cv2.putText(frame, label, (x1 + 5, y1 - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
+
+    def process_frame(self, frame):
         """ Process frame
 
         Args:
             frame (np.array): Frame of video
         """
-
         boxes = self.vehicle_detector.detect(frame)
 
         detections = self.tracker.extract_detections(boxes)
-        tracks = self.tracker.deep_sort.update_tracks(
+        tracks = self.tracker.update_tracks(
             detections, frame=frame)
 
-        if features["speed_estimation"]:
-            self.tracker.draw_tracks(
-                frame, tracks, self.speed_estimator)
+        frame = self.rlv_detector.detect_traffic_light_color(
+            frame)
+        rl_violation_log = self.rlv_detector.detect_red_light_violation(
+            frame, tracks)
 
-        if features["red_light_violation_detection"]:
-            frame, detected_color = self.rlv_detector.detect_traffic_light_color(
-                frame)
-            frame, violation = self.rlv_detector.detect_red_light_violation(
-                frame, tracks)
-
-        if features["wrong_lane_driving_detection"]:
-            pass
+        self.draw_tracks(frame, rl_violation_log)
 
         return frame
 
-    def process_video(self, features: Dict[str, bool] = {
-            "speed_estimation": True,
-            "red_light_violation_detection": True,
-            "wrong_lane_driving_detection": True,
-    }):
+    def process_video(self):
         """ Process video """
         video_path = self.config["samples"][self.camera_name]["video_path"]
         output_path = self.config["samples"][self.camera_name]["output_path"]
@@ -74,6 +109,8 @@ class Controller:
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         fps = cap.get(cv2.CAP_PROP_FPS)
         self.speed_estimator.fps = fps
+        self.frame_skipper.target_fps = fps
+        self.frame_skipper.fps_timer = time.time()
         out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
 
         while True:
@@ -83,8 +120,32 @@ class Controller:
             if not ret:
                 print("End of video or error reading frame.")
                 break
+            self.frame_skipper.frame_counter += 1
 
-            frame = self.process_frame(frame, features)
+            if self.frame_skipper.is_skipable():
+                self.frame_skipper.total_skip_frames += 1
+                continue
+
+            frame = self.process_frame(frame)
+
+            processing_time = time.time() - self.frame_skipper.fps_timer
+            self.frame_skipper.adjust_skip_rate(processing_time)
+            self.frame_skipper.update_fps()
+
+            if self.frame_skipper.frame_counter > 5:
+                self.speed_estimator.fps = self.frame_skipper.current_fps
+
+            fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
+            skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
+            proc_text = f"Proc time: {processing_time*1000:.1f}ms"
+
+            cv2.putText(frame, fps_text, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, skip_text, (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, proc_text, (10, 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
             resized_frame = cv2.resize(frame, frame_size)
 
             out.write(resized_frame)

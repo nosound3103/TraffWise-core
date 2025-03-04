@@ -12,13 +12,8 @@ class RedLightViolationDetector:
         self.read_annotation()
 
         self.red_range = [
-            [0, 100, 100],
-            [10, 255, 255]
-        ]
-
-        self.green_range = [
-            [0, 43, 184],
-            [56, 132, 255]
+            [0, 0, 156],
+            [33, 179, 255]
         ]
 
         self.car_ids_in_stop_area = defaultdict(set)
@@ -113,7 +108,7 @@ class RedLightViolationDetector:
                         0.6, color, 2)
             self.detected_color = is_red
 
-        return frame, self.detected_color
+        return frame
 
     def detect_red_light_violation(self, frame, tracks):
         """ Detect red light violation
@@ -163,17 +158,17 @@ class RedLightViolationDetector:
                 else:
                     violation_flag = False
 
-            violation = "Red light violation" if violation_flag else "Safe"
-            color = (0, 0, 255) if violation_flag else (0, 255, 0)
+            # violation = "Red light violation" if violation_flag else "Safe"
+            # color = (0, 0, 255) if violation_flag else (0, 255, 0)
 
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, violation,
-                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, color, 2)
+            # cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            # cv2.putText(frame, violation,
+            #             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
+            #             0.6, color, 2)
 
             violation_logs.append({
                 "track": track,
                 "violation_type": violation_flag
             })
 
-        return frame, violation_logs
+        return violation_logs

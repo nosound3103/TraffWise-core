@@ -1,61 +1,91 @@
 import os
-import glob
-import random
-import numpy as np
-import cv2
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
+from PIL import Image
+
+data_transform = transforms.Compose([
+    transforms.Resize(size=(640, 640)),
+    transforms.ToTensor()
+])
+
+class_to_idx = {
+    "bus": 0, "car": 1, "motorbike": 2, "truck": 3,
+}
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-class DataLoader:
-    def __init__(self, data_path, subset='train', img_size=640, batch_size=16, augment=False):
-        self.data_path = os.path.join(data_path, 'images', subset)
-        self.label_path = os.path.join(data_path, 'labels', subset)
-        self.img_size = img_size
-        self.batch_size = batch_size
-        self.augment = augment
-        self.img_files = glob.glob(os.path.join(self.data_path, '*.jpg'))
-        self.label_files = [os.path.join(self.label_path, os.path.basename(
-            x).replace('.jpg', '.txt')) for x in self.img_files]
-        self.indices = list(range(len(self.img_files)))
-        self.current_index = 0
+class CustomDataset(Dataset):
+    def __init__(self,
+                 root_dir,
+                 split="train",
+                 class_to_idx=class_to_idx,
+                 transform=data_transform):
+        self.root_dir = root_dir
+        self.split = split
+        self.transform = transform
+        self.class_to_idx = class_to_idx if class_to_idx else {}
+        self.device = device
+
+        self.image_dir = os.path.join(root_dir, "images", split)
+        self.label_dir = os.path.join(root_dir, "labels", split)
+
+        self.image_files = [f for f in os.listdir(
+            self.image_dir) if f.endswith(".jpg") or f.endswith(".png")]
 
     def __len__(self):
-        return len(self.img_files) // self.batch_size
+        return len(self.image_files)
 
-    def __iter__(self):
-        self.current_index = 0
-        if self.augment:
-            random.shuffle(self.indices)
-        return self
+    def __getitem__(self, idx):
+        img_filename = self.image_files[idx]
+        img_path = os.path.join(self.image_dir, img_filename)
 
-    def __next__(self):
-        if self.current_index >= len(self.indices):
-            raise StopIteration
+        img_name, _ = os.path.splitext(img_filename)
+        label_path = os.path.join(self.label_dir, img_name + ".txt")
 
-        batch_indices = self.indices[self.current_index:
-                                     self.current_index + self.batch_size]
-        self.current_index += self.batch_size
+        img = Image.open(img_path).convert("RGB")
+        original_width, original_height = img.size
 
-        images, labels = [], []
-        for idx in batch_indices:
-            img_path = self.img_files[idx]
-            label_path = self.label_files[idx]
+        boxes = []
+        labels = []
 
-            img = cv2.imread(img_path)
-            img = cv2.resize(img, (self.img_size, self.img_size))
-            # BGR to RGB and HWC to CHW
-            img = img[:, :, ::-1].transpose(2, 0, 1)
-            img = np.ascontiguousarray(img, dtype=np.float32) / 255.0
+        if os.path.exists(label_path):
+            with open(label_path, "r") as f:
+                for line in f.readlines():
+                    parts = line.strip().split()
+                    if len(parts) < 5:
+                        continue
 
-            with open(label_path, 'r') as f:
-                label = np.array([list(map(float, x.split()))
-                                 for x in f.read().strip().splitlines()])
+                    class_id = int(parts[0])
+                    x_center, y_center, w, h = map(float, parts[1:])
 
-            images.append(img)
-            labels.append(label)
+                    xmin = (x_center - w / 2) * original_width
+                    ymin = (y_center - h / 2) * original_height
+                    xmax = (x_center + w / 2) * original_width
+                    ymax = (y_center + h / 2) * original_height
 
-        return np.stack(images, axis=0), labels
+                    if xmin < xmax and ymin < ymax:
+                        boxes.append([xmin, ymin, xmax, ymax])
+                        labels.append(class_id + 1)
 
-# Example usage:
-# dataloader = DataLoader(data_path='/path/to/dataset', subset='train', img_size=640, batch_size=16, augment=True)
-# for images, labels in dataloader:
-#     # Training code here
+        boxes = torch.tensor(boxes, dtype=torch.float32)
+        labels = torch.tensor(labels, dtype=torch.int64)
+        target = {"boxes": boxes, "labels": labels}
+
+        if len(boxes) == 0:
+            boxes = torch.zeros((1, 4), dtype=torch.float32)
+            labels = torch.zeros((1,), dtype=torch.int64)
+
+        if self.transform:
+            img = self.transform(img)
+
+        new_width, new_height = 640, 640
+        scale_x = new_width / original_width
+        scale_y = new_height / original_height
+
+        boxes[:, [0, 2]] *= scale_x
+        boxes[:, [1, 3]] *= scale_y
+        target["boxes"] = boxes
+
+        return img, target

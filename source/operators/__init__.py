@@ -6,4 +6,3 @@ sys.path.append(os.path.abspath(os.path.join(__dir__, "../..")))
 
 # autopep8: off
 
-from source.operators.controller import Controller
