@@ -123,30 +123,30 @@ class Controller:
                 print("End of video or error reading frame.")
                 break
 
-            # if self.frame_skipper.is_skipable():
-            #     self.frame_skipper.total_skip_frames += 1
-            #     continue
+            if self.frame_skipper.is_skipable():
+                self.frame_skipper.total_skip_frames += 1
+                continue
 
             frame = self.process_frame(frame)
 
-            # processing_time = time.time() - self.frame_skipper.fps_timer
-            # self.frame_skipper.adjust_skip_rate(processing_time)
-            # self.frame_skipper.update_fps()
+            processing_time = time.time() - self.frame_skipper.fps_timer
+            self.frame_skipper.adjust_skip_rate(processing_time)
+            self.frame_skipper.update_fps()
 
-            # if self.frame_skipper.frame_counter > 5:
-            #     # self.speed_estimator.fps = self.frame_skipper.current_fps
-            #     pass
+            if self.frame_skipper.frame_counter > 5:
+                self.speed_estimator.fps = self.frame_skipper.current_fps
+                pass
 
-            # fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
-            # skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
-            # proc_text = f"Proc time: {processing_time*1000:.1f}ms"
+            fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
+            skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
+            proc_text = f"Proc time: {processing_time*1000:.1f}ms"
 
-            # cv2.putText(frame, fps_text, (10, 30),
-            #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            # cv2.putText(frame, skip_text, (10, 60),
-            #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            # cv2.putText(frame, proc_text, (10, 90),
-            #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, fps_text, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, skip_text, (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, proc_text, (10, 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
             resized_frame = cv2.resize(frame, frame_size)
 

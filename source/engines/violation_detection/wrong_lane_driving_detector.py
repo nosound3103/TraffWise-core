@@ -1,7 +1,7 @@
 import cv2, yaml
 import numpy as np
 from shapely import Polygon
-from ..utils.lane import Lane  # Import lớp Lane từ file lane.py
+from ..utils.lane import Lane
 
 class WrongLaneDrivingDetector:
     """
@@ -211,11 +211,7 @@ class WrongLaneDrivingDetector:
         return None
     
     def capture_violation(self, track_id, frame, bbox):
-        x1, y1, x2, y2 = map(int, bbox)
-
-        violation_crop = frame[y1:y2, x1:x2]
-        cv2.imwrite(f"evidence/wrong_way_{track_id}.jpg", violation_crop)
-        self.position_histories.pop(track_id, None)
+        pass
     
     def draw_lanes(self, frame):
         for lane in self.lanes:

@@ -19,10 +19,12 @@ class ViewTransformer:
 class Lane:
     def __init__(self, source_polygon: np.ndarray, target_width: int, target_height: int, expected_direction_points=None, expected_direction=None, speed_limit: int=60):
         """
-        :param source_polygon: Numpy array (4,2) contains coordinates of image.
-        :param target_width: Width of target.
-        :param target_height: Height of target.
-        :param expected_direction: Expected direction vertor of lane.
+        Params:
+        source_polygon: Numpy array (4,2) contains coordinates of image.
+        target_width: Width of target.
+        target_height: Height of target.
+        expected_direction: Expected direction vertor of lane.
+        speed_limit: Limit speed of the lane
         """
         self.source_polygon = source_polygon.astype(np.float32)
         self.target_width = target_width

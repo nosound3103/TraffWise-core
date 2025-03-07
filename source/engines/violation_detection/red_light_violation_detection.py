@@ -152,13 +152,4 @@ class RedLightViolationDetector:
             else:
                 red_light_violation = False
 
-        # violation = "Red light violation" if violation_flag else "Safe"
-        # color = (0, 0, 255) if violation_flag else (0, 255, 0)
-
-        # cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        # cv2.putText(frame, violation,
-        #             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-        #             0.6, color, 2)
-
-
         return red_light_violation
