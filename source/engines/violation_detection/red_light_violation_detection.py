@@ -110,7 +110,7 @@ class RedLightViolationDetector:
 
         return frame
 
-    def detect_red_light_violation(self, frame, tracks):
+    def detect_red_light_violation(self, frame, bbox, track_id, class_id):
         """ Detect red light violation
 
         Args:
@@ -128,47 +128,37 @@ class RedLightViolationDetector:
                 frame, [stop_area],
                 True, (0, 0, 255), 2)
 
-        violation_logs = []
+        red_light_violation = False
 
-        for track in tracks:
-            violation_flag = None
+        x1, y1, x2, y2 = map(int, bbox)
 
-            track_id = track.track_id
-            ltrb = track.to_ltrb()
-            class_id = int(track.get_det_class())
-            x1, y1, x2, y2 = map(int, ltrb)
+        center = ((x1 + x2) // 2, (y1 + y2) // 2)
 
-            center = ((x1 + x2) // 2, (y1 + y2) // 2)
+        is_in_stop_area = any([
+            cv2.pointPolygonTest(stop_area, center, False) >= 0
+            for stop_area in stop_areas
+        ])
 
-            is_in_stop_area = any([
-                cv2.pointPolygonTest(stop_area, center, False) >= 0
-                for stop_area in stop_areas
-            ])
-
-            if track_id not in self.car_ids_in_stop_area[class_id] and is_in_stop_area:
-                self.car_ids_in_stop_area[class_id].add(track_id)
-            elif track_id not in self.car_ids_in_stop_area[class_id] and not is_in_stop_area:
-                violation_flag = False
-            else:
-                if not is_in_stop_area:
-                    if self.detected_color:
-                        violation_flag = True
-                    else:
-                        violation_flag = False
+        if track_id not in self.car_ids_in_stop_area[class_id] and is_in_stop_area:
+            self.car_ids_in_stop_area[class_id].add(track_id)
+        elif track_id not in self.car_ids_in_stop_area[class_id] and not is_in_stop_area:
+            red_light_violation = False
+        else:
+            if not is_in_stop_area:
+                if self.detected_color:
+                    red_light_violation = True
                 else:
-                    violation_flag = False
+                    red_light_violation = False
+            else:
+                red_light_violation = False
 
-            # violation = "Red light violation" if violation_flag else "Safe"
-            # color = (0, 0, 255) if violation_flag else (0, 255, 0)
+        # violation = "Red light violation" if violation_flag else "Safe"
+        # color = (0, 0, 255) if violation_flag else (0, 255, 0)
 
-            # cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            # cv2.putText(frame, violation,
-            #             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-            #             0.6, color, 2)
+        # cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        # cv2.putText(frame, violation,
+        #             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
+        #             0.6, color, 2)
 
-            violation_logs.append({
-                "track": track,
-                "violation_type": violation_flag
-            })
 
-        return violation_logs
+        return red_light_violation

@@ -10,3 +10,4 @@ from source.engines.speed_estimation.speed_estimator import SpeedEstimator
 from source.engines.detectors.vehicle_detector import VehicleDetector
 from source.engines.tracking.deepsort import DeepSORT
 from source.engines.violation_detection.wrong_lane_driving_detector import WrongLaneDrivingDetector
+from source.engines.utils.lane import Lane
