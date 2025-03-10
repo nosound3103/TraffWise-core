@@ -1,5 +1,6 @@
 import cv2, yaml
 import numpy as np
+from datetime import datetime
 from shapely import Polygon
 from ..utils.lane import Lane
 
@@ -14,9 +15,10 @@ class WrongLaneDrivingDetector:
     straight_threshold: If the angle difference is smaller than this threshold, the vehicle is considered to be moving straight.
     dot_threshold: If the dot product is lower than this threshold, it indicates that the vehicle is moving against the expected direction
     """
-    def __init__(self, config, camera_name, window_size=5, angle_threshold=90, straight_threshold=45, dot_threshold=-0.5):
+    def __init__(self, config, camera_name, uploader, window_size=5, angle_threshold=90, straight_threshold=45, dot_threshold=-0.5):
         self.config = config
         self.annotation_path = self.config["samples"][camera_name]["annotation_path"]
+        self.uploader = uploader
         self.lanes = self.create_lane_list()
         self.window_size = window_size
         self.angle_threshold = angle_threshold      
@@ -25,6 +27,7 @@ class WrongLaneDrivingDetector:
         self.position_histories = {}  # Lưu lịch sử tọa độ bottom center của từng track
         self.intersect = self.compute_intersections()
         self.violations_count = {}
+
 
     def create_lane_list(self):
         """
@@ -93,6 +96,7 @@ class WrongLaneDrivingDetector:
             intersect = [inter_poly]
         return intersect
 
+
     def is_point_in_intersection(self, position):
         """
         Checks whether the given position (x, y) lies in any of the computed intersection regions.
@@ -109,6 +113,7 @@ class WrongLaneDrivingDetector:
                 return True
         return False
         
+
     def _estimate_direction(self, points):
         """
         Estimate the average movement direction based on a sliding window of positions.
@@ -120,6 +125,7 @@ class WrongLaneDrivingDetector:
         norm = np.linalg.norm(avg_diff)
         return avg_diff / norm if norm > 1e-6 else np.array([0.0, 0.0])
     
+
     def classify_turn(self, expected, estimated):
         """
         Compute the cross product and angle between the estimated movement vector and the expected direction vector.
@@ -143,6 +149,7 @@ class WrongLaneDrivingDetector:
         else:
             return "straight"
     
+
     def detect_violation(self, track_id, bbox, frame, speed):
         """
         Determine the vehicle's movement direction and detect wrong way violations:
@@ -198,11 +205,13 @@ class WrongLaneDrivingDetector:
                 if speed > 3:
                     self.violations_count[track_id] = self.violations_count.get(track_id, 0) + 1
                     if self.violations_count[track_id] > 30:
+                        self.violations_count.pop(track_id, None)
                         wrong_way_violation = True
                         # self.capture_violation(track_id, frame, bbox)
             return wrong_way_violation, turn_type
         return wrong_way_violation, "unknown"
     
+
     def _get_lane_index(self, position):
         """Find lane"""
         for idx, lane in enumerate(self.lanes):
@@ -210,9 +219,29 @@ class WrongLaneDrivingDetector:
                 return idx
         return None
     
-    def capture_violation(self, track_id, frame, bbox):
-        pass
+
+    def capture_violation(self, frame, log):
+        """Capture."""
+        x1, y1, x2, y2 = map(int, log["ltrb"])  # Lấy tọa độ bbox
+
+        # Draw violation box
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)  # Màu đỏ, độ dày 10px
+        cv2.putText(frame, "Wrong way", (x1, y1 - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+        date = datetime.now().strftime('%Y-%m-%d')
+        folder_path = f"traffic/violations/wrong_way/{date}"
+        public_id_prefix = f"{folder_path}/{log["track_id"]}"
+
+        exists = self.uploader.file_exists_on_cloudinary(public_id_prefix)
+
+        if not exists:
+            timestamp = datetime.now().strftime('%H-%M-%S')
+            public_id = f"{public_id_prefix}_{timestamp}"
+            self.uploader.upload_violation(frame, public_id, folder_path)
+            print("Capture violation!")
     
+
     def draw_lanes(self, frame):
         for lane in self.lanes:
             pts = lane.source_polygon.reshape((-1, 1, 2)).astype(np.int32)
