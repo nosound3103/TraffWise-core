@@ -134,7 +134,7 @@ class Controller:
 
         cap = cv2.VideoCapture(video_path)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
         self.speed_estimator.fps = fps
         self.frame_skipper.target_fps = fps
         self.frame_skipper.fps_timer = time.time()
