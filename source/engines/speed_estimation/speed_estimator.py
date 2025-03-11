@@ -20,9 +20,12 @@ class SpeedEstimator:
             if len(self.coordinates) >= self.max_tracks:
                 self.coordinates.popitem(last=False)  
 
-            self.coordinates[track_id] = deque(maxlen=self.fps)  
+            self.coordinates[track_id] = deque()  
 
         self.coordinates[track_id].append(point)
+
+        while len(self.coordinates[track_id]) > self.fps:
+            self.coordinates[track_id].popleft()
 
     def _calculate_speed(self, track_id: int) -> float:
         """Calculate speed based on moving coordinates"""
