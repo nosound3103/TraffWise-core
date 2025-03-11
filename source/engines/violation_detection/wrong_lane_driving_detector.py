@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime
 from shapely import Polygon
 from ..utils.lane import Lane
+from collections import defaultdict, deque, OrderedDict
 
 class WrongLaneDrivingDetector:
     """
@@ -15,18 +16,19 @@ class WrongLaneDrivingDetector:
     straight_threshold: If the angle difference is smaller than this threshold, the vehicle is considered to be moving straight.
     dot_threshold: If the dot product is lower than this threshold, it indicates that the vehicle is moving against the expected direction
     """
-    def __init__(self, config, camera_name, uploader, window_size=5, angle_threshold=90, straight_threshold=45, dot_threshold=-0.5):
+    def __init__(self, config, camera_name, uploader, window_size=5, angle_threshold=90, straight_threshold=45, dot_threshold=-0.5, max_tracks=50):
         self.config = config
         self.annotation_path = self.config["samples"][camera_name]["annotation_path"]
         self.uploader = uploader
+        self.max_tracks = max_tracks
         self.lanes = self.create_lane_list()
         self.window_size = window_size
         self.angle_threshold = angle_threshold      
         self.straight_threshold = straight_threshold  
         self.dot_threshold = dot_threshold            
-        self.position_histories = {}  # Lưu lịch sử tọa độ bottom center của từng track
+        self.position_histories = OrderedDict()  
+        self.violations_count = OrderedDict()
         self.intersect = self.compute_intersections()
-        self.violations_count = {}
 
 
     def create_lane_list(self):
@@ -149,6 +151,20 @@ class WrongLaneDrivingDetector:
         else:
             return "straight"
     
+    def _update_position_history(self, track_id: int, position):
+        """Save vehicle positions and limit the number of tracked vehicles"""
+        if track_id not in self.position_histories:
+            if len(self.position_histories) >= self.max_tracks:
+                self.position_histories.popitem(last=False)  
+                self.violations_count.popitem(last=False)
+
+            self.position_histories[track_id] = deque() 
+            self.violations_count[track_id] = 0  
+
+        self.position_histories[track_id].append(position)
+
+        while len(self.position_histories[track_id]) > self.window_size:
+            self.position_histories[track_id].popleft()
 
     def detect_violation(self, track_id, bbox, frame, speed):
         """
@@ -161,7 +177,7 @@ class WrongLaneDrivingDetector:
         - Check intersection.
         - If the vehicle is moving straight but the dot product is less than dot_threshold,
           consider it a wrong way violation, crop the image, and draw a bounding box around the violation.
-        Return the turn type (turn_type).
+        Return: wrong_way_violation (boolean), turn type (string).
         """
         x1, y1, x2, y2 = map(int, bbox)
         x_center = (x1 + x2) / 2
@@ -169,28 +185,21 @@ class WrongLaneDrivingDetector:
         position = (x_center, y_center)
         wrong_way_violation = False
 
-        if track_id not in self.position_histories:
-            self.position_histories[track_id] = []
-        self.position_histories[track_id].append(position)
-
-        if len(self.position_histories[track_id]) > self.window_size:
-            self.position_histories[track_id].pop(0)
-        
         lane_index = self._get_lane_index(position)
 
         if lane_index is None:
-            self.position_histories.pop(track_id, None)
-            self.violations_count.pop(track_id, None)
             return wrong_way_violation, "unknown"
+        
+        self._update_position_history(track_id, position)
 
         if len(self.position_histories[track_id]) < 2:
             return wrong_way_violation, "unknown"
-        
+    
         direction = self._estimate_direction(self.position_histories[track_id])
         if np.linalg.norm(direction) > 1e-6:
             if speed <= 3:
-                turn_type = "unknown"
-                return wrong_way_violation, turn_type
+                return wrong_way_violation, "unknown"
+
             dot_product = np.dot(direction, self.lanes[lane_index].expected_direction)
             dot_product = np.clip(dot_product, -1.0, 1.0)
             angle_diff = np.degrees(np.arccos(dot_product))
@@ -203,14 +212,13 @@ class WrongLaneDrivingDetector:
             # Check wrong way
             if dot_product < self.dot_threshold or angle_diff > self.angle_threshold:
                 if speed > 3:
-                    self.violations_count[track_id] = self.violations_count.get(track_id, 0) + 1
+                    self.violations_count[track_id] += 1
                     if self.violations_count[track_id] > 30:
-                        self.violations_count.pop(track_id, None)
+                        self.violations_count[track_id] = 0
                         wrong_way_violation = True
-                        # self.capture_violation(track_id, frame, bbox)
+
             return wrong_way_violation, turn_type
         return wrong_way_violation, "unknown"
-    
 
     def _get_lane_index(self, position):
         """Find lane"""
@@ -221,11 +229,10 @@ class WrongLaneDrivingDetector:
     
 
     def capture_violation(self, frame, log):
-        """Capture."""
-        x1, y1, x2, y2 = map(int, log["ltrb"])  # Lấy tọa độ bbox
+        """Take a photo of the violation and upload it to Cloudinary"""
+        x1, y1, x2, y2 = map(int, log["ltrb"])
 
-        # Draw violation box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)  # Màu đỏ, độ dày 10px
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)
         cv2.putText(frame, "Wrong way", (x1, y1 - 10), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
