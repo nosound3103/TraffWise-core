@@ -10,7 +10,7 @@ class SpeedEstimator:
 
         
         self.coordinates = OrderedDict()
-        self.violations_count = defaultdict(int)  
+        self.violations_count = OrderedDict()  
 
         self.max_tracks = max_tracks  
 
@@ -19,8 +19,10 @@ class SpeedEstimator:
         if track_id not in self.coordinates:
             if len(self.coordinates) >= self.max_tracks:
                 self.coordinates.popitem(last=False)  
+                self.violations_count.popitem(last=False) 
 
             self.coordinates[track_id] = deque()  
+            self.violations_count[track_id] = 0 
 
         self.coordinates[track_id].append(point)
 
@@ -58,8 +60,6 @@ class SpeedEstimator:
         lane_index = self._get_lane_index(position)
 
         if lane_index is None:
-            self.coordinates.pop(track_id, None)
-            self.violations_count.pop(track_id, None)
             return speed_violation, 0.0
 
         transformed_point = self.lanes[lane_index].transform(np.array([[x_center, y_center]]))[0]
@@ -70,7 +70,7 @@ class SpeedEstimator:
         if speed > self.lanes[lane_index].speed_limit:
             self.violations_count[track_id] += 1  
             if self.violations_count[track_id] > 30:
-                self.violations_count.pop(track_id, None)
+                self.violations_count[track_id] = 0
                 speed_violation = True
 
         return speed_violation, speed
