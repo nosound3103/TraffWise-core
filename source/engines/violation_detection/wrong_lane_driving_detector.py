@@ -211,6 +211,7 @@ class WrongLaneDrivingDetector:
 
             # Check wrong way
             if dot_product < self.dot_threshold or angle_diff > self.angle_threshold:
+                turn_type = self.classify_turn(self.lanes[lane_index].expected_direction[::-1], direction)
                 if speed > 3:
                     self.violations_count[track_id] += 1
                     if self.violations_count[track_id] > 30:
