@@ -2,10 +2,11 @@ import cv2
 import time
 import numpy as np
 from typing import Literal, Dict
+from concurrent.futures import ThreadPoolExecutor
 
 from .adaptive_frame_skipper import AdaptiveFrameSkipper
 from ..engines import VehicleDetector, DeepSORT, \
-    RedLightViolationDetector, SpeedEstimator
+    RedLightViolationDetector, SpeedEstimator, WrongLaneDrivingDetector
 from ..process import AsyncCloudinaryUploader
 
 
@@ -14,6 +15,7 @@ class Controller:
                  config,
                  camera_name:
                      Literal[
+                         "llgt_fpt",
                          "speed_test",
                          "speed_test_1",
                          "red_light_violation_test",
@@ -24,6 +26,7 @@ class Controller:
                          "camera_2_day"] = "red_light_violation_test"):
         self.config = config
         self.class_names = list(config["labels"].keys())
+        self.executor = ThreadPoolExecutor(max_workers=3)
         self.colors = [
             (255, 255, 0),
             (0, 255, 255),
@@ -35,48 +38,74 @@ class Controller:
         self.uploader = AsyncCloudinaryUploader()
 
         self.vehicle_detector = VehicleDetector(config["models"])
-        self.tracker = DeepSORT(
-            config, self.camera_name)
+        self.tracker = DeepSORT(config)
         self.rlv_detector = RedLightViolationDetector(
             config, self.camera_name)
-        self.speed_estimator = SpeedEstimator()
+        self.wrong_way = WrongLaneDrivingDetector(
+            config, self.camera_name, self.uploader)
+        self.speed_estimator = SpeedEstimator(
+            self.wrong_way.lanes, self.uploader)
 
-    def draw_tracks(self, frame, rl_violation_log):
-        for vehicle_violation in rl_violation_log:
-            track = vehicle_violation["track"]
-            violation_flag = vehicle_violation["violation_type"]
+    def draw_track(self, frame, log):
+        violation = []
 
-            if not track.is_confirmed():
-                continue
+        if log["speed_violation"]:
+            violation.append("Overspeeding")
+        if log["red_light_violation"]:
+            violation.append("RLV")
+        if log["wrong_way_violation"]:
+            violation.append("Wrong way")
 
-            track_id = track.track_id
-            ltrb = track.to_ltrb()
-            class_id = int(track.get_det_class())
+        violation_text = "-".join(violation)
 
-            x1, y1, x2, y2 = map(int, ltrb)
-            color = self.colors[class_id] if not violation_flag else (
-                0, 0, 255)
-            B, G, R = map(int, color)
-            label = f"{self.class_names[class_id]}-{track_id}"
+        x1, y1, x2, y2 = map(int, log["ltrb"])
+        color = self.colors[log["class_id"]]
+        B, G, R = map(int, color)
 
-            x_center = (ltrb[0] + ltrb[2]) / 2
-            y_center = ltrb[3]
+        class_id_log = log["class_id"]
+        track_id_log = log["track_id"]
+        speed_log = int(log["speed"])
 
-            transformed_point = self.tracker.view_transformer.transform_points(
-                np.array([[x_center, y_center]]))[0]
+        label = f"{self.class_names[class_id_log]}-{track_id_log}-{int(speed_log)} km/h-{log['turn_type']}"
 
-            self.speed_estimator.update_coordinates(
-                track_id, transformed_point)
-            speed = self.speed_estimator.calculate_speed(track_id)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
+        cv2.rectangle(frame, (x1 - 1, y1 - 20),
+                      (x1 + len(label) * 12, y1), (B, G, R), -1)
+        # cv2.putText(frame, log["turn_type"], (x1, y2 + 30),
+        #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        cv2.putText(frame, label, (x1 + 5, y1 - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
 
-            rl_v = "RLV" if violation_flag else "No RLV"
-            if violation_flag:
-                self.uploader.upload_violation(frame)
+        # cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)
+        # cv2.putText(frame, "Wrong_way", (x1, y2 + 10),
+        #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-            label = f"{self.class_names[class_id]}-{track_id}-{rl_v}-{int(speed)} km/h"
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
-            cv2.putText(frame, label, (x1 + 5, y1 - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2)
+        cv2.rectangle(frame, (x1 - 1, y1 - 20),
+                      (x1 + len(violation_text) * 12, y1), (B, G, R), -1)
+        cv2.putText(frame, violation_text, (x1, y2 + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+    def submit_violation(self, frame, log):
+        if log["speed_violation"]:
+            print(f"Track_id: {log['track_id']} got over speed violation!")
+            frame_copy = frame.copy()
+            future = self.executor.submit(
+                self.speed_estimator.capture_violation, frame_copy, log)
+            # future.add_done_callback(lambda f: print(f"Done process!"))
+
+        # if log["red_light_violation"]:
+        #     print(f"Track_id: {log['track_id']} got red light violation!")
+        #     frame_copy = frame.copy()
+        #     future = self.executor.submit(
+        #         self.rlv_detector.capture_violation, frame_copy, log)
+            # future.add_done_callback(lambda f: print(f"Done process!"))
+
+        if log["wrong_way_violation"]:
+            print(f"Track_id: {log['track_id']} got wrong way violation!")
+            frame_copy = frame.copy()
+            future = self.executor.submit(
+                self.wrong_way.capture_violation, frame_copy, log)
+            # future.add_done_callback(lambda f: print(f"Done process!"))
 
     def process_frame(self, frame):
         """ Process frame
@@ -90,12 +119,42 @@ class Controller:
         tracks = self.tracker.update_tracks(
             detections, frame=frame)
 
-        frame = self.rlv_detector.detect_traffic_light_color(
-            frame)
-        rl_violation_log = self.rlv_detector.detect_red_light_violation(
-            frame, tracks)
+        if self.rlv_detector.activated:
+            frame = self.rlv_detector.detect_traffic_light_color(frame)
+        violation_frame = frame.copy()
 
-        self.draw_tracks(frame, rl_violation_log)
+        for track in tracks:
+            if not track.is_confirmed():
+                continue
+            track_id = track.track_id
+            ltrb = track.to_ltrb()
+            class_id = int(track.get_det_class())
+            # Speed Estimate
+            speed_violation, speed = self.speed_estimator.detection_speed(
+                track_id, ltrb, frame)
+            # Wrong way driving detection
+            wrong_way_violation, turn_type = self.wrong_way.detect_violation(
+                track_id, ltrb, frame, speed)
+            # Red light detection
+            if self.rlv_detector.activated:
+                red_light_violation = self.rlv_detector.detect_red_light_violation(
+                    track)
+            else:
+                red_light_violation = None
+
+            log = dict(
+                track_id=track_id,
+                ltrb=ltrb,
+                class_id=class_id,
+                speed=speed,
+                turn_type=turn_type,
+                speed_violation=speed_violation,
+                wrong_way_violation=wrong_way_violation,
+                red_light_violation=red_light_violation
+            )
+
+            self.draw_track(frame, log)
+            self.submit_violation(violation_frame, log)
 
         return frame
 
@@ -107,7 +166,7 @@ class Controller:
 
         cap = cv2.VideoCapture(video_path)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
         self.speed_estimator.fps = fps
         self.frame_skipper.target_fps = fps
         self.frame_skipper.fps_timer = time.time()
@@ -120,10 +179,10 @@ class Controller:
             if not ret:
                 print("End of video or error reading frame.")
                 break
-            self.frame_skipper.frame_counter += 1
 
             if self.frame_skipper.is_skipable():
                 self.frame_skipper.total_skip_frames += 1
+                self.frame_skipper.update_fps()
                 continue
 
             frame = self.process_frame(frame)
@@ -132,8 +191,9 @@ class Controller:
             self.frame_skipper.adjust_skip_rate(processing_time)
             self.frame_skipper.update_fps()
 
-            if self.frame_skipper.frame_counter > 5:
-                self.speed_estimator.fps = self.frame_skipper.current_fps
+            # if self.frame_skipper.frame_counter > 5:
+            #     self.speed_estimator.fps = self.frame_skipper.current_fps
+            #     continue
 
             fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
             skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
@@ -161,3 +221,8 @@ class Controller:
         cap.release()
         out.release()
         cv2.destroyAllWindows()
+
+    def __del__(self):
+        """Close ThreadPoolExecutor when program ends."""
+        self.executor.shutdown(wait=True)
+        print("Close all threads!")

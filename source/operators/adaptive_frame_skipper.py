@@ -18,6 +18,7 @@ class AdaptiveFrameSkipper:
 
     def update_fps(self):
         self.fps_counter += 1
+        self.frame_counter += 1
         if time.time() - self.fps_timer >= 1.0:
             self.current_fps = self.fps_counter
             self.fps_counter = 0
@@ -25,7 +26,7 @@ class AdaptiveFrameSkipper:
 
     def adjust_skip_rate(self, processing_time):
         self.processing_times.append(processing_time)
-        if len(self.processing_times) > 5:
+        if len(self.processing_times) > 10:
             self.processing_times.pop(0)
 
         avg_processing_time = sum(

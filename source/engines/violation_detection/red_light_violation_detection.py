@@ -8,7 +8,7 @@ class RedLightViolationDetector:
     def __init__(self, config, camera_name):
         self.config = config
         self.annotation_path = self.config["samples"][camera_name]["annotation_path"]
-
+        self.activated = True
         self.read_annotation()
 
         self.red_range = [
@@ -27,9 +27,15 @@ class RedLightViolationDetector:
         with open(self.annotation_path, "r") as file:
             self.data = yaml.safe_load(file)
 
+        self.traffic_lights = []
+
         for road_name, road_info in self.data["roads"].items():
             if road_info['traffic_lights']['coordinates']:
-                self.traffic_light = road_info['traffic_lights']['coordinates']
+                self.traffic_lights.append(
+                    road_info['traffic_lights']['coordinates'])
+
+        if not self.traffic_lights:
+            self.activated = False
 
         # for shape in data["shapes"]:
         #     if shape["label"] == "stop_area":
@@ -54,24 +60,24 @@ class RedLightViolationDetector:
             tuple: (accessible_road, blocked_road) - Names of the roads that can and cannot be accessed
         """
         # Find which road has traffic lights
-        road_with_light = None
-        road_without_light = None
+        roads_with_light = []
+        roads_without_light = []
 
         for road_name, road_info in self.data["roads"].items():
             if road_info['traffic_lights']['coordinates']:
-                road_with_light = road_name
+                roads_with_light.append(road_name)
             else:
-                road_without_light = road_name
+                roads_without_light.append(road_name)
 
-        if not road_with_light:
+        if not roads_with_light:
             raise ValueError(
                 "No road with traffic lights found in the configuration")
 
         # Determine which road to use based on traffic light status
         if current_traffic_light_status:  # Green light
-            return road_with_light
+            return roads_with_light
         else:  # Red light
-            return road_without_light
+            return roads_without_light
 
     def detect_traffic_light_color(self, frame):
         """ Detect traffic light color
@@ -81,8 +87,8 @@ class RedLightViolationDetector:
         """
 
         traffic_light_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-        for i in range(len(self.traffic_light)):
-            area = np.array(self.traffic_light[i], np.int32)
+        for i in range(len(self.traffic_lights)):
+            area = np.array(self.traffic_lights[i], np.int32)
             cv2.fillPoly(traffic_light_mask, [area], 255)
 
         frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -94,7 +100,7 @@ class RedLightViolationDetector:
 
         self.detected_color = None
 
-        for traffic_light in self.traffic_light:
+        for traffic_light in self.traffic_lights:
             traffic_light = np.array(traffic_light, np.int32)
             status = "GO" if not is_red else "STOP"
             color = (0, 255, 0) if not is_red else (0, 0, 255)
@@ -108,9 +114,28 @@ class RedLightViolationDetector:
                         0.6, color, 2)
             self.detected_color = is_red
 
+        frame = self.draw_annotation(frame)
+
         return frame
 
-    def detect_red_light_violation(self, frame, tracks):
+    def draw_annotation(self, frame):
+        self.road_access = self.check_road_access(self.detected_color)
+
+        self.stop_areas = [self.data["roads"][road]['stop_areas']['coordinates']
+                           for road in self.road_access
+                           if self.data["roads"][road]['stop_areas']['coordinates']]
+
+        self.stop_areas = [np.array(stop_area, np.int32)
+                           for stop_area in self.stop_areas]
+
+        for stop_area in self.stop_areas:
+            cv2.polylines(
+                frame, [stop_area],
+                True, (0, 0, 255), 2)
+
+        return frame
+
+    def detect_red_light_violation(self, track):
         """ Detect red light violation
 
         Args:
@@ -118,45 +143,28 @@ class RedLightViolationDetector:
             boxes(list): List of boxes(Contain ids of vehicles)
         """
 
-        road_access = self.check_road_access(self.detected_color)
-        stop_areas = self.data["roads"][road_access]['stop_areas']['coordinates']
-        stop_areas = [np.array(stop_area, np.int32)
-                      for stop_area in stop_areas]
-
-        for stop_area in stop_areas:
-            cv2.polylines(
-                frame, [stop_area],
-                True, (0, 0, 255), 2)
-
-        violation_logs = []
-
-        for track in tracks:
-            violation_flag = None
-
-            track_id = track.track_id
-            ltrb = track.to_ltrb()
-            class_id = int(track.get_det_class())
-            x1, y1, x2, y2 = map(int, ltrb)
-
-            center = ((x1 + x2) // 2, (y1 + y2) // 2)
-
-            is_in_stop_area = any([
-                cv2.pointPolygonTest(stop_area, center, False) >= 0
-                for stop_area in stop_areas
-            ])
-
-            if track_id not in self.car_ids_in_stop_area[class_id] and is_in_stop_area:
-                self.car_ids_in_stop_area[class_id].add(track_id)
-            elif track_id not in self.car_ids_in_stop_area[class_id] and not is_in_stop_area:
-                violation_flag = False
-            else:
-                if not is_in_stop_area:
-                    if self.detected_color:
-                        violation_flag = True
-                    else:
-                        violation_flag = False
+        violation_flag = None
+        track_id = track.track_id
+        ltrb = track.to_ltrb()
+        class_id = int(track.get_det_class())
+        x1, y1, x2, y2 = map(int, ltrb)
+        center = ((x1 + x2) // 2, (y1 + y2) // 2)
+        is_in_stop_area = any([
+            cv2.pointPolygonTest(stop_area, center, False) >= 0
+            for stop_area in self.stop_areas
+        ])
+        if track_id not in self.car_ids_in_stop_area[class_id] and is_in_stop_area:
+            self.car_ids_in_stop_area[class_id].add(track_id)
+        elif track_id not in self.car_ids_in_stop_area[class_id] and not is_in_stop_area:
+            violation_flag = False
+        else:
+            if not is_in_stop_area:
+                if self.detected_color:
+                    violation_flag = True
                 else:
                     violation_flag = False
+            else:
+                violation_flag = False
 
             # violation = "Red light violation" if violation_flag else "Safe"
             # color = (0, 0, 255) if violation_flag else (0, 255, 0)
@@ -166,9 +174,4 @@ class RedLightViolationDetector:
             #             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
             #             0.6, color, 2)
 
-            violation_logs.append({
-                "track": track,
-                "violation_type": violation_flag
-            })
-
-        return violation_logs
+        return violation_flag

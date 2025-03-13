@@ -1,23 +1,11 @@
-import csv
-import os
 import torch
-import torchvision
-import torchmetrics
-import numpy as np
 import torchvision.transforms.functional as F
-from PIL import Image
-from typing import Dict, List, Tuple
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from tqdm import tqdm
-from torch.optim import AdamW, SGD
-from torchmetrics.detection.mean_ap import MeanAveragePrecision
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models.detection.backbone_utils import BackboneWithFPN
-from torchvision.models import mobilenet_v3_small, resnet34
+from torchvision.models import mobilenet_v3_small
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models import MobileNet_V3_Small_Weights
 
 
 class CustomRCNNTransform(GeneralizedRCNNTransform):
@@ -41,11 +29,10 @@ class CustomRCNNTransform(GeneralizedRCNNTransform):
 class FRCNN(torch.nn.Module):
     def __init__(self,
                  num_classes,
-                 backbone_name="mobilenet_v3_small",
-                 pretrained=True):
+                 pretrained=MobileNet_V3_Small_Weights.DEFAULT):
         super(FRCNN, self).__init__()
         self.num_classes = num_classes
-        self.backbone = self.get_backbone(backbone_name, pretrained)
+        self.backbone = self.get_backbone(pretrained)
 
         self.anchor_sizes = (32, 64, 128, 256)
         self.aspect_ratios = ((0.5, 1.0, 2.0),) * len(self.anchor_sizes)
@@ -63,16 +50,10 @@ class FRCNN(torch.nn.Module):
 
         self.model.transform = CustomRCNNTransform()
 
-    def get_backbone(self, backbone_name, pretrained):
-        if backbone_name == "mobilenet_v3_small":
-            backbone = mobilenet_v3_small(pretrained=pretrained).features
-            return_layers = {'2': '0', '7': '1', '12': '2'}
-            in_channels = [24, 48, 576]
-        elif backbone_name == "resnet34":
-            backbone = resnet34(pretrained=pretrained,
-                                norm_layer=torchvision.ops.FrozenBatchNorm2d)
-            return_layers = {'layer1': '0', 'layer2': '1', 'layer3': '2'}
-            in_channels = [64, 128, 256]
+    def get_backbone(self, pretrained):
+        backbone = mobilenet_v3_small(weights=pretrained).features
+        return_layers = {'2': '0', '7': '1', '12': '2'}
+        in_channels = [24, 48, 576]
 
         backbone.out_channels = 64
         fpn = BackboneWithFPN(
