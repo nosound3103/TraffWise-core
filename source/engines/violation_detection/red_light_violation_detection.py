@@ -1,155 +1,113 @@
 import cv2
 import numpy as np
-import yaml
-from collections import defaultdict
+from collections import defaultdict, deque, OrderedDict
 
 
 class RedLightViolationDetector:
-    def __init__(self, config, camera_name):
-        self.config = config
-        self.annotation_path = self.config["samples"][camera_name]["annotation_path"]
-
-        self.read_annotation()
-
-        self.red_range = [
-            [0, 0, 156],
-            [33, 179, 255]
+    def __init__(self, lane_manager, uploader, max_track=50):
+        self.lane_manager = lane_manager
+        self.max_track = max_track
+        self.red_1_range = [
+            [0, 128, 128],
+            [10, 255, 255]
+        ]
+        self.red_2_range = [
+            [170, 128, 128],
+            [180, 255, 255]
+        ]
+        self.orange_range = [
+            [5, 120, 70],
+            [25, 255, 255]
         ]
 
-        self.car_ids_in_stop_area = defaultdict(set)
+        self.car_states = OrderedDict()  
 
-    def read_annotation(self):
-        """ Read annotation file """
-
-        # self.stop_areas = []
-        # self.traffic_lights = []
-
-        with open(self.annotation_path, "r") as file:
-            self.data = yaml.safe_load(file)
-
-        for road_name, road_info in self.data["roads"].items():
-            if road_info['traffic_lights']['coordinates']:
-                self.traffic_light = road_info['traffic_lights']['coordinates']
-
-        # for shape in data["shapes"]:
-        #     if shape["label"] == "stop_area":
-        #         stop_area = shape["points"]
-        #         stop_area = np.array(stop_area, np.int32)
-        #         self.stop_areas.append(stop_area)
-        #     elif shape["label"] == "traffic_light":
-        #         points = shape["points"]
-        #         points = np.array(points, np.int32)
-        #         self.traffic_lights.append(points)
-
-    def check_road_access(self, current_traffic_light_status):
-        """
-        Determine which road to use based on traffic light status.
-
-        Args:
-            current_traffic_light_status (bool): 
-                True if traffic light is green, 
-                False if red
-
-        Returns:
-            tuple: (accessible_road, blocked_road) - Names of the roads that can and cannot be accessed
-        """
-        # Find which road has traffic lights
-        road_with_light = None
-        road_without_light = None
-
-        for road_name, road_info in self.data["roads"].items():
-            if road_info['traffic_lights']['coordinates']:
-                road_with_light = road_name
-            else:
-                road_without_light = road_name
-
-        if not road_with_light:
-            raise ValueError(
-                "No road with traffic lights found in the configuration")
-
-        # Determine which road to use based on traffic light status
-        if current_traffic_light_status:  # Green light
-            return road_with_light
-        else:  # Red light
-            return road_without_light
-
-    def detect_traffic_light_color(self, frame):
-        """ Detect traffic light color
-
-        Args:
-            frame(np.array): Frame of video
-        """
-
-        traffic_light_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-        for i in range(len(self.traffic_light)):
-            area = np.array(self.traffic_light[i], np.int32)
-            cv2.fillPoly(traffic_light_mask, [area], 255)
-
+    def detect_traffic_light_color(self, frame: np.ndarray):
+        """Detect traffic light color."""
         frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        for lane in self.lane_manager.lanes:
+            if lane.traffic_light is None:
+                lane.traffic_light_status = None  
+                continue
+            
+            traffic_light_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            area = np.array(lane.traffic_light, np.int32)
+            cv2.fillPoly(traffic_light_mask, [area], 255)
+            
+            red_1_mask = cv2.inRange(frame_hsv, np.array(self.red_1_range[0]), np.array(self.red_1_range[1]))
+            red_2_mask = cv2.inRange(frame_hsv, np.array(self.red_2_range[0]), np.array(self.red_2_range[1]))
+            red_mask = cv2.bitwise_or(red_1_mask, red_2_mask)
 
-        red_mask = cv2.inRange(frame_hsv, np.array(
-            self.red_range[0]), np.array(self.red_range[1]))
-        frame_red = cv2.bitwise_and(red_mask, traffic_light_mask)
-        is_red = cv2.countNonZero(frame_red) > 0
+            orange_mask = cv2.inRange(frame_hsv, np.array(self.orange_range[0]), np.array(self.orange_range[1]))
 
-        self.detected_color = None
+            stop_mask = cv2.bitwise_or(red_mask, orange_mask)
+            
+            frame_red = cv2.bitwise_and(stop_mask, traffic_light_mask)
+            is_red = cv2.countNonZero(frame_red) > 0  
+            
+            lane.traffic_light_status = is_red
+            
+            color = (0, 255, 0) if not lane.traffic_light_status else (0, 0, 255)
+            status = "GO" if not lane.traffic_light_status else "STOP"
+            stop_area = np.array(lane.stop_area, np.int32)
+            if is_red:
+                cv2.polylines(frame, [stop_area], isClosed=True, color=color, thickness=3)
 
-        for traffic_light in self.traffic_light:
-            traffic_light = np.array(traffic_light, np.int32)
-            status = "GO" if not is_red else "STOP"
-            color = (0, 255, 0) if not is_red else (0, 0, 255)
-
-            cv2.polylines(
-                frame, [traffic_light],
-                True, color, 2)
-            cv2.putText(frame, status,
-                        traffic_light[0],
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, color, 2)
-            self.detected_color = is_red
-
+            cv2.polylines(frame, [np.array(lane.traffic_light, np.int32)], True, color, 2)
+            cv2.putText(frame, status, (int(lane.traffic_light[0][0]), int(lane.traffic_light[0][1])),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        
         return frame
 
-    def detect_red_light_violation(self, frame, bbox, track_id, class_id):
-        """ Detect red light violation
-
-        Args:
-            frame(np.array): Frame of video
-            boxes(list): List of boxes(Contain ids of vehicles)
-        """
-
-        road_access = self.check_road_access(self.detected_color)
-        stop_areas = self.data["roads"][road_access]['stop_areas']['coordinates']
-        stop_areas = [np.array(stop_area, np.int32)
-                      for stop_area in stop_areas]
-
-        for stop_area in stop_areas:
-            cv2.polylines(
-                frame, [stop_area],
-                True, (0, 0, 255), 2)
-
-        red_light_violation = False
-
+    def detect_red_light_violation(self, track_id, bbox):
+        """Detect red light violation"""
+        
+        if len(self.car_states) >= self.max_track:
+            self.car_states.popitem(last=False)  
+        
         x1, y1, x2, y2 = map(int, bbox)
-
         center = ((x1 + x2) // 2, (y1 + y2) // 2)
+        
+        lane = self.lane_manager.get_lane(center)
+        if lane is None or lane.traffic_light_status is None:
+            return False  
+        
+        stop_area = np.array(lane.stop_area, np.int32)
+        
+        is_in_stop_area = cv2.pointPolygonTest(stop_area, center, False) >= 0
+        
+        if track_id not in self.car_states:
+            self.car_states[track_id] = {"in_stop_area": False, "violated": False}
+        
+        car_state = self.car_states[track_id]
+        if is_in_stop_area:
+            car_state["in_stop_area"] = True  
+        
+        is_red_light = lane.traffic_light_status
+        
+        if car_state["in_stop_area"] and not is_in_stop_area and is_red_light:
+            car_state["violated"] = True
 
-        is_in_stop_area = any([
-            cv2.pointPolygonTest(stop_area, center, False) >= 0
-            for stop_area in stop_areas
-        ])
+        
+        return car_state["violated"]
 
-        if track_id not in self.car_ids_in_stop_area[class_id] and is_in_stop_area:
-            self.car_ids_in_stop_area[class_id].add(track_id)
-        elif track_id not in self.car_ids_in_stop_area[class_id] and not is_in_stop_area:
-            red_light_violation = False
-        else:
-            if not is_in_stop_area:
-                if self.detected_color:
-                    red_light_violation = True
-                else:
-                    red_light_violation = False
-            else:
-                red_light_violation = False
+    def capture_violation(self, frame, log):
+        """Take a photo of the violation and upload it to Cloudinary"""
+        x1, y1, x2, y2 = map(int, log["ltrb"])
 
-        return red_light_violation
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)
+        cv2.putText(frame, "RLV", (x1, y1 - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+        date = datetime.now().strftime('%Y-%m-%d')
+        folder_path = f"traffic/violations/rlv/{date}"
+        public_id_prefix = f"{folder_path}/{log["track_id"]}"
+
+        exists = self.uploader.file_exists_on_cloudinary(public_id_prefix)
+
+        if not exists:
+            timestamp = datetime.now().strftime('%H-%M-%S')
+            public_id = f"{public_id_prefix}_{timestamp}"
+            self.uploader.upload_violation(frame, public_id, folder_path)
+            print("Capture violation!")
