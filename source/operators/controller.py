@@ -147,6 +147,7 @@ class Controller:
         fps = int(cap.get(cv2.CAP_PROP_FPS)) + 1
         desired_fps = int(fps/skip_frame)
         self.speed_estimator.fps = fps
+        self.wrong_way.fps = desired_fps
         out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
         frame_counter = 0
         start_time = time.time()
