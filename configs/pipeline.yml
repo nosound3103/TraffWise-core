@@ -1,18 +1,16 @@
+conf_threshold: 0.7
+
 labels:
   bus: 0
   car: 1
   motorbike: 2
   truck: 3
 
-frame_skipper:
-  initial_skip: 2
-  target_fps: 25
-  max_skip_frames: 0
-  adjustment_speed: 0.3
+skip_frame: 3
 
 models:
   yolo11:
-    path: data/models/one-stage/yolo11-newdata.pt
+    path: data/models/best.pt
   detr:
     path: data/models/transformer-based/detr-r50.pt
   faster_rcnn:
@@ -20,29 +18,10 @@ models:
 
 samples:
   speed_test:
-    video_path: data/samples/videos/speed_test.mp4
-    output_path: data/debug/videos/speed_test.mp4
-    annotation_path: data/samples/annotations/speed_test.yml
+    video_path: data/videos/LLGT_FPT.mp4
+    output_path: data/debug/LLGT_FPT.mp4
+    annotation_path: data/annotations/LLGT_FPT.yml
   speed_test_1:
-    video_path: data/samples/videos/Traffic Camera VN 4.mp4
-    output_path: data/debug/videos/speed_test_1.mp4
-    annotation_path: data/samples/annotations/speed_test_1.yml
-  red_light_violation_test:
-    video_path: data/samples/videos/red_light_violation_test.mp4
-    output_path: data/debug/videos/red_light_violation_test.mp4
-    annotation_path: data/samples/annotations/red_light_violation_test.yml
-  camera_1_night:
-    video_path: data/samples/videos/Traffic Camera VN 1.mp4
-    output_path: data/debug/videos/Traffic Camera VN 1.mp4
-  camera_2_night:
-    video_path: data/samples/videos/Traffic Camera VN 2.mp4
-    output_path: data/debug/videos/Traffic Camera VN 2.mp4
-  camera_1_day:
-    video_path: data/samples/videos/Traffic Camera VN 3.mp4
-    output_path: data/debug/videos/Traffic Camera VN 3.mp4
-  camera_2_day:
-    video_path: data/samples/videos/Traffic Camera VN 4.mp4
-    output_path: data/debug/videos/Traffic Camera VN 4.mp4
-  camera_3_night:
-    video_path: data/samples/videos/Traffic Camera VN 5.mp4
-    output_path: data/debug/videos/Traffic Camera VN 5.mp4
+    video_path: data/videos/Traffic_VN.mp4
+    output_path: data/debug/Traffic_VN.mp4
+    annotation_path: data/annotations/Traffic_VN.yml

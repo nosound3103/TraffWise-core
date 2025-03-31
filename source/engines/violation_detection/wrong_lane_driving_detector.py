@@ -9,14 +9,15 @@ class WrongLaneDrivingDetector:
     based on a combination of the direction vector and the angle difference between the estimated movement direction  
     and the expected lane direction.
     """
-    def __init__(self, lane_manager, uploader, window_size=5, angle_threshold=90, straight_threshold=30, dot_threshold=-0.5, max_tracks=50):
+    def __init__(self, lane_manager, uploader, window_size=5, angle_threshold=90, straight_threshold=30, dot_threshold=-0.5, max_tracks=50, fps=30):
         self.lane_manager = lane_manager
         self.uploader = uploader
         self.max_tracks = max_tracks
         self.window_size = window_size
         self.angle_threshold = angle_threshold      
         self.straight_threshold = straight_threshold  
-        self.dot_threshold = dot_threshold            
+        self.dot_threshold = dot_threshold
+        self.fps = fps             
         self.position_histories = OrderedDict()  
         self.violations_count = OrderedDict()
 
@@ -99,7 +100,7 @@ class WrongLaneDrivingDetector:
                 turn_type = self.classify_turn(lane.expected_direction[::-1], direction)
                 if speed > 3:
                     self.violations_count[track_id] += 1
-                    if self.violations_count[track_id] > 30:
+                    if self.violations_count[track_id] > self.fps*3:
                         self.violations_count[track_id] = 0
                         wrong_way_violation = True
 

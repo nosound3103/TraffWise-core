@@ -59,7 +59,7 @@ class SpeedEstimator:
 
         if speed > lane.speed_limit:
             self.violations_count[track_id] += 1  
-            if self.violations_count[track_id] > 30:
+            if self.violations_count[track_id] > self.fps*3:
                 self.violations_count[track_id] = 0
                 speed_violation = True
 

@@ -14,6 +14,11 @@ from ..process import AsyncCloudinaryUploader
 class Controller:
     def __init__(self,
                  config,
+                 model_type:
+                     Literal[
+                        "yolo11",
+                        "detr",
+                        "faster_rcnn"] = "yolo11",
                  camera_name:
                      Literal[
                          "speed_test",
@@ -36,7 +41,7 @@ class Controller:
         self.camera_name = camera_name
         self.frame_skipper = AdaptiveFrameSkipper(config["frame_skipper"])
         self.uploader = AsyncCloudinaryUploader()
-        self.vehicle_detector = VehicleDetector(config["models"])
+        self.vehicle_detector = VehicleDetector(config["models"], model_type)
         self.tracker = DeepSORT(config, self.camera_name)
         self.lane_manager = LaneManager(config, self.camera_name)
         self.rlv_detector = RedLightViolationDetector(self.lane_manager, self.uploader)
@@ -132,17 +137,19 @@ class Controller:
 
     def process_video(self):
         """ Process video """
+        skip_frame = self.config["skip_frame"]
         video_path = self.config["samples"][self.camera_name]["video_path"]
         output_path = self.config["samples"][self.camera_name]["output_path"]
         frame_size = (1280, 960)
 
         cap = cv2.VideoCapture(video_path)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        fps = int(cap.get(cv2.CAP_PROP_FPS)) + 1
+        desired_fps = int(fps/skip_frame)
         self.speed_estimator.fps = fps
-        self.frame_skipper.target_fps = fps
-        self.frame_skipper.fps_timer = time.time()
         out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
+        frame_counter = 0
+        start_time = time.time()
 
         while True:
 
@@ -152,30 +159,16 @@ class Controller:
                 print("End of video or error reading frame.")
                 break
 
-            if self.frame_skipper.is_skipable():
-                self.frame_skipper.total_skip_frames += 1
-                continue
+            frame_counter += 1
+            if frame_counter % skip_frame != 0: continue
+
 
             frame = self.process_frame(frame)
 
-            processing_time = time.time() - self.frame_skipper.fps_timer
-            self.frame_skipper.adjust_skip_rate(processing_time)
-            self.frame_skipper.update_fps()
-
-            if self.frame_skipper.frame_counter > 5:
-                self.speed_estimator.fps = int(self.frame_skipper.current_fps)
-                pass
-
-            fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
-            skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
-            proc_text = f"Proc time: {processing_time*1000:.1f}ms"
-
-            cv2.putText(frame, fps_text, (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, skip_text, (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, proc_text, (10, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            if frame_counter % desired_fps == 0:
+                process_time = time.time() - start_time
+                start_time = time.time()
+                print(f"Process in a second: {process_time} (current process fps is {desired_fps})")
 
             resized_frame = cv2.resize(frame, frame_size)
 
