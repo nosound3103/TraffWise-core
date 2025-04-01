@@ -1,35 +1,38 @@
 import cv2
 import numpy as np
 from datetime import datetime
-from collections import defaultdict, deque, OrderedDict
+from collections import deque, OrderedDict
 
 
 class SpeedEstimator:
-    def __init__(self, lanes, uploader, fps: int = 30, max_tracks: int = 50):
-        self.fps = fps
-        self.lanes = lanes
+    def __init__(self, lane_manager, uploader, fps: int = 30, max_tracks: int = 50):
+        self.lane_manager = lane_manager
         self.uploader = uploader
-
-        self.coordinates = OrderedDict()
-        self.violations_count = defaultdict(int)
-
+        self.fps = fps
         self.max_tracks = max_tracks
+        self.coordinates = OrderedDict()
+        self.violations_count = OrderedDict()
 
     def _update_coordinates(self, track_id: int, point: np.ndarray):
         """Save vehicle coordinates and limit the number of tracked vehicles"""
         if track_id not in self.coordinates:
             if len(self.coordinates) >= self.max_tracks:
                 self.coordinates.popitem(last=False)
+                self.violations_count.popitem(last=False)
 
-            self.coordinates[track_id] = deque(maxlen=self.fps)
+            self.coordinates[track_id] = deque()
+            self.violations_count[track_id] = 0
 
         self.coordinates[track_id].append(point)
+
+        while len(self.coordinates[track_id]) > self.fps:
+            self.coordinates[track_id].popleft()
 
     def _calculate_speed(self, track_id: int) -> float:
         """Calculate speed based on moving coordinates"""
         if len(self.coordinates[track_id]) < 2:
             return 0.0
-        safe_fps = max(self.fps, 1)
+        safe_fps = max(self.fps, 10)
         start = self.coordinates[track_id][0]
         end = self.coordinates[track_id][-1]
         distance = np.linalg.norm(np.array(start) - np.array(end))
@@ -38,38 +41,28 @@ class SpeedEstimator:
         speed = (distance / time) * 3.6
         return speed
 
-    def _get_lane_index(self, position):
-        """Determine which lane the vehicle is in"""
-        for idx, lane in enumerate(self.lanes):
-            if cv2.pointPolygonTest(lane.source_polygon, position, False) >= 0:
-                return idx
-        return None
-
-    def detection_speed(self, track_id, bbox, frame):
+    def detect_speed(self, track_id, bbox, frame) -> tuple:
         """Determine vehicle speed and check for violations"""
         x1, y1, x2, y2 = map(int, bbox)
         x_center = (x1 + x2) / 2
         y_center = (y1 + y2) / 2
         position = (x_center, y_center)
-
         speed_violation = False
-        lane_index = self._get_lane_index(position)
 
-        if lane_index is None:
-            self.coordinates.pop(track_id, None)
-            self.violations_count.pop(track_id, None)
+        lane = self.lane_manager.get_lane(position)
+
+        if lane is None:
             return speed_violation, 0.0
 
-        transformed_point = self.lanes[lane_index].transform(
-            np.array([[x_center, y_center]]))[0]
+        transformed_point = lane.transform(np.array([[x_center, y_center]]))[0]
         self._update_coordinates(track_id, transformed_point)
 
         speed = self._calculate_speed(track_id)
 
-        if speed > self.lanes[lane_index].speed_limit:
+        if speed > lane.speed_limit:
             self.violations_count[track_id] += 1
-            if self.violations_count[track_id] > 30:
-                self.violations_count.pop(track_id, None)
+            if self.violations_count[track_id] > self.fps*3:
+                self.violations_count[track_id] = 0
                 speed_violation = True
 
         return speed_violation, speed

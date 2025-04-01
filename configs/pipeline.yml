@@ -1,3 +1,5 @@
+conf_threshold: 0.7
+
 labels:
   bus: 0
   car: 1
@@ -23,10 +25,10 @@ samples:
     video_path: data/samples/videos/LLGT_FPT.mp4
     output_path: data/debug/videos/LLGT_FPT.mp4
     annotation_path: data/samples/annotations/LLGT_FPT.yml
-  camera_vn_7:
-    video_path: data/samples/videos/Traffic Camera VN 7.mp4
-    output_path: data/debug/videos/Traffic Camera VN 7.mp4
-    annotation_path: data/samples/annotations/Traffic Camera VN 7.yml
+  traffic_vn:
+    video_path: data/samples/videos/Traffic_VN.mp4
+    output_path: data/debug/videos/Traffic_VN.mp4
+    annotation_path: data/samples/annotations/Traffic_VN.yml
   speed_test:
     video_path: data/samples/videos/speed_test.mp4
     output_path: data/debug/videos/speed_test.mp4

@@ -5,8 +5,8 @@ from typing import Literal, Dict
 from concurrent.futures import ThreadPoolExecutor
 
 from .adaptive_frame_skipper import AdaptiveFrameSkipper
-from ..engines import VehicleDetector, DeepSORT, \
-    RedLightViolationDetector, SpeedEstimator, WrongLaneDrivingDetector
+from ..engines import VehicleDetector, DeepSORT, RedLightViolationDetector, \
+    SpeedEstimator, WrongLaneDrivingDetector, LaneManager
 from ..process import AsyncCloudinaryUploader
 
 
@@ -16,6 +16,7 @@ class Controller:
                  camera_name:
                      Literal[
                          "llgt_fpt",
+                         "traffic_vn",
                          "speed_test",
                          "speed_test_1",
                          "red_light_violation_test",
@@ -39,12 +40,12 @@ class Controller:
 
         self.vehicle_detector = VehicleDetector(config["models"])
         self.tracker = DeepSORT(config)
+        self.lane_manager = LaneManager(config, self.camera_name)
         self.rlv_detector = RedLightViolationDetector(
-            config, self.camera_name)
+            self.lane_manager, self.uploader)
         self.wrong_way = WrongLaneDrivingDetector(
-            config, self.camera_name, self.uploader)
-        self.speed_estimator = SpeedEstimator(
-            self.wrong_way.lanes, self.uploader)
+            self.lane_manager, self.uploader)
+        self.speed_estimator = SpeedEstimator(self.lane_manager, self.uploader)
 
     def draw_track(self, frame, log):
         violation = []
@@ -71,14 +72,8 @@ class Controller:
         cv2.rectangle(frame, (x1, y1), (x2, y2), (B, G, R), 2)
         cv2.rectangle(frame, (x1 - 1, y1 - 20),
                       (x1 + len(label) * 12, y1), (B, G, R), -1)
-        # cv2.putText(frame, log["turn_type"], (x1, y2 + 30),
-        #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
         cv2.putText(frame, label, (x1 + 5, y1 - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-
-        # cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)
-        # cv2.putText(frame, "Wrong_way", (x1, y2 + 10),
-        #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
         cv2.rectangle(frame, (x1 - 1, y1 - 20),
                       (x1 + len(violation_text) * 12, y1), (B, G, R), -1)
@@ -93,11 +88,11 @@ class Controller:
                 self.speed_estimator.capture_violation, frame_copy, log)
             # future.add_done_callback(lambda f: print(f"Done process!"))
 
-        # if log["red_light_violation"]:
-        #     print(f"Track_id: {log['track_id']} got red light violation!")
-        #     frame_copy = frame.copy()
-        #     future = self.executor.submit(
-        #         self.rlv_detector.capture_violation, frame_copy, log)
+        if log["red_light_violation"]:
+            print(f"Track_id: {log['track_id']} got red light violation!")
+            frame_copy = frame.copy()
+            future = self.executor.submit(
+                self.rlv_detector.capture_violation, frame_copy, log)
             # future.add_done_callback(lambda f: print(f"Done process!"))
 
         if log["wrong_way_violation"]:
@@ -114,13 +109,10 @@ class Controller:
             frame (np.array): Frame of video
         """
         boxes = self.vehicle_detector.detect(frame)
-
         detections = self.tracker.extract_detections(boxes)
-        tracks = self.tracker.update_tracks(
-            detections, frame=frame)
+        tracks = self.tracker.update_tracks(detections, frame=frame)
 
-        if self.rlv_detector.activated:
-            frame = self.rlv_detector.detect_traffic_light_color(frame)
+        frame = self.rlv_detector.detect_traffic_light_color(frame)
         violation_frame = frame.copy()
 
         for track in tracks:
@@ -130,17 +122,14 @@ class Controller:
             ltrb = track.to_ltrb()
             class_id = int(track.get_det_class())
             # Speed Estimate
-            speed_violation, speed = self.speed_estimator.detection_speed(
+            speed_violation, speed = self.speed_estimator.detect_speed(
                 track_id, ltrb, frame)
             # Wrong way driving detection
             wrong_way_violation, turn_type = self.wrong_way.detect_violation(
                 track_id, ltrb, frame, speed)
             # Red light detection
-            if self.rlv_detector.activated:
-                red_light_violation = self.rlv_detector.detect_red_light_violation(
-                    track)
-            else:
-                red_light_violation = None
+            red_light_violation = self.rlv_detector.detect_red_light_violation(
+                track_id, ltrb)
 
             log = dict(
                 track_id=track_id,

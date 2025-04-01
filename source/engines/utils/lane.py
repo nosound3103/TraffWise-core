@@ -1,19 +1,11 @@
-import cv2
 import numpy as np
-
 from .view_transformer import ViewTransformer
 
 
 class Lane:
-    def __init__(self, source_polygon: np.ndarray, target_width: int, target_height: int, expected_direction_points=None, expected_direction=None, speed_limit: int = 60):
-        """
-        Params:
-        source_polygon: Numpy array (4,2) contains coordinates of image.
-        target_width: Width of target.
-        target_height: Height of target.
-        expected_direction: Expected direction vertor of lane.
-        speed_limit: Limit speed of the lane
-        """
+    def __init__(self, source_polygon: np.ndarray, target_width: int, target_height: int,
+                 expected_direction_points: np.ndarray, expected_direction: np.ndarray,
+                 traffic_light: np.ndarray, stop_area: np.ndarray, speed_limit: int):
         self.source_polygon = source_polygon.astype(np.float32)
         self.target_width = target_width
         self.target_height = target_height
@@ -25,7 +17,10 @@ class Lane:
         ], dtype=np.float32)
         self.transformer = ViewTransformer(
             self.source_polygon, self.target_polygon)
+        self.traffic_light = traffic_light
+        self.stop_area = stop_area
         self.speed_limit = speed_limit
+        self.traffic_light_status = None
 
         if expected_direction_points is not None:
             pA, pB = expected_direction_points[0]
@@ -39,7 +34,7 @@ class Lane:
             raise ValueError(
                 "Provide expected_direction_points or expected_direction.")
 
-    def compute_expected_direction(self, pointA, pointB):
+    def compute_expected_direction(self, pointA, pointB) -> np.ndarray:
         v = np.array(pointB, dtype=np.float32) - \
             np.array(pointA, dtype=np.float32)
         norm = np.linalg.norm(v)

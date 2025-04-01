@@ -892,7 +892,7 @@ def calculate_num_labels(
 #     }
 # )
 
-random.seed(42)
+# random.seed(42)
 
 # merge_datasets(
 #     list_folders=[
@@ -904,7 +904,7 @@ random.seed(42)
 #     output_folder='data/dataset/combination'
 # )
 
-clear_non_label_in_yolo('data/dataset/combination')
+# clear_non_label_in_yolo('data/dataset/combination')
 
 # merge_datasets(
 #     list_folders=[
