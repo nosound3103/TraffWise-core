@@ -14,45 +14,18 @@ frame_skipper:
 
 models:
   yolo11:
-    path: data/models/one-stage/yolo11-newdata.pt
-  detr:
-    path: data/models/transformer-based/detr-r50.pt
+    path: api/data/models/one-stage/yolo11-augdata.pt
+  rtdetrv2:
+    path: api/data/models/transformer-based/rtdetrv2-nano-resnet.pt
   faster_rcnn:
-    path: data/models/two-stage/faster-rcnn.pt
+    path: api/data/models/two-stage/faster_rcnn.pt
 
 samples:
-  llgt_fpt:
-    video_path: data/samples/videos/LLGT_FPT.mp4
-    output_path: data/debug/videos/LLGT_FPT.mp4
-    annotation_path: data/samples/annotations/LLGT_FPT.yml
-  traffic_vn:
-    video_path: data/samples/videos/Traffic_VN.mp4
-    output_path: data/debug/videos/Traffic_VN.mp4
-    annotation_path: data/samples/annotations/Traffic_VN.yml
-  speed_test:
-    video_path: data/samples/videos/speed_test.mp4
-    output_path: data/debug/videos/speed_test.mp4
-    annotation_path: data/samples/annotations/speed_test.yml
-  speed_test_1:
-    video_path: data/samples/videos/Traffic Camera VN 4.mp4
-    output_path: data/debug/videos/speed_test_1.mp4
-    annotation_path: data/samples/annotations/speed_test_1.yml
-  red_light_violation_test:
-    video_path: data/samples/videos/red_light_violation_test.mp4
-    output_path: data/debug/videos/red_light_violation_test.mp4
-    annotation_path: data/samples/annotations/red_light_violation_test.yml
-  camera_1_night:
-    video_path: data/samples/videos/Traffic Camera VN 1.mp4
-    output_path: data/debug/videos/Traffic Camera VN 1.mp4
-  camera_2_night:
-    video_path: data/samples/videos/Traffic Camera VN 2.mp4
-    output_path: data/debug/videos/Traffic Camera VN 2.mp4
-  camera_1_day:
-    video_path: data/samples/videos/Traffic Camera VN 3.mp4
-    output_path: data/debug/videos/Traffic Camera VN 3.mp4
-  camera_2_day:
-    video_path: data/samples/videos/Traffic Camera VN 4.mp4
-    output_path: data/debug/videos/Traffic Camera VN 4.mp4
-  camera_3_night:
-    video_path: data/samples/videos/Traffic Camera VN 5.mp4
-    output_path: data/debug/videos/Traffic Camera VN 5.mp4
+  "1":
+    video_path: api/data/samples/videos/LLGT_FPT.mp4
+    output_path: api/data/debug/videos/LLGT_FPT.mp4
+    annotation_path: api/data/samples/annotations/LLGT_FPT.yml
+  "2":
+    video_path: api/data/samples/videos/Traffic_VN.mp4
+    output_path: api/data/debug/videos/Traffic_VN.mp4
+    annotation_path: api/data/samples/annotations/Traffic_VN.yml
