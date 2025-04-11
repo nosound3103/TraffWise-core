@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from datetime import datetime
 from collections import deque, OrderedDict
+import time
 
 
 class SpeedEstimator:
@@ -11,43 +11,86 @@ class SpeedEstimator:
         self.fps = fps
         self.max_tracks = max_tracks
         self.coordinates = OrderedDict()
+        self.timestamps = OrderedDict()
         self.violations_count = OrderedDict()
+        self.max_history_seconds = 3.0
 
-    def _update_coordinates(self, track_id: int, point: np.ndarray):
-        """Save vehicle coordinates and limit the number of tracked vehicles"""
+    def _update_coordinates(self, track_id: int, point: np.ndarray, timestamp: float):
+        """
+        Save vehicle coordinates with timestamps to handle frame skipping
+
+        Args:
+            track_id: The vehicle's tracking ID
+            point: The transformed position coordinates
+            timestamp: Current timestamp in seconds
+        """
         if track_id not in self.coordinates:
             if len(self.coordinates) >= self.max_tracks:
                 self.coordinates.popitem(last=False)
+                self.timestamps.popitem(last=False)
                 self.violations_count.popitem(last=False)
 
             self.coordinates[track_id] = deque()
+            self.timestamps[track_id] = deque()
             self.violations_count[track_id] = 0
 
         self.coordinates[track_id].append(point)
+        self.timestamps[track_id].append(timestamp)
 
-        while len(self.coordinates[track_id]) > self.fps:
+        # Limit history by time rather than frame count to handle frame skipping
+        while len(self.timestamps[track_id]) > 1 and timestamp - self.timestamps[track_id][0] > self.max_history_seconds:
             self.coordinates[track_id].popleft()
+            self.timestamps[track_id].popleft()
 
     def _calculate_speed(self, track_id: int) -> float:
-        """Calculate speed based on moving coordinates"""
-        if len(self.coordinates[track_id]) < 2:
+        """
+        Calculate speed based on actual time elapsed rather than frame count
+        to handle frame skipping correctly
+        """
+        if len(self.coordinates[track_id]) < 2 or len(self.timestamps[track_id]) < 2:
             return 0.0
-        safe_fps = max(self.fps, 10)
-        start = self.coordinates[track_id][0]
-        end = self.coordinates[track_id][-1]
-        distance = np.linalg.norm(np.array(start) - np.array(end))
-        time = len(self.coordinates[track_id]) / safe_fps
 
-        speed = (distance / time) * 3.6
+        # Use first and last position with their corresponding timestamps
+        start_pos = self.coordinates[track_id][0]
+        end_pos = self.coordinates[track_id][-1]
+        start_time = self.timestamps[track_id][0]
+        end_time = self.timestamps[track_id][-1]
+
+        # Calculate distance in transformed space
+        distance = np.linalg.norm(np.array(start_pos) - np.array(end_pos))
+
+        # Calculate actual elapsed time
+        elapsed_time = end_time - start_time
+
+        # Avoid division by zero or unrealistic time values
+        if elapsed_time < 0.01:
+            return 0.0
+
+        # Convert to km/h (distance in arbitrary units * calibration factor)
+        speed = (distance / elapsed_time) * 3.6
         return speed
 
-    def detect_speed(self, track_id, bbox, frame) -> tuple:
-        """Determine vehicle speed and check for violations"""
+    def detect_speed(self, track_id, bbox, timestamp=None) -> tuple:
+        """
+        Determine vehicle speed and check for violations, accounting for frame skipping
+
+        Args:
+            track_id: Vehicle tracking ID
+            bbox: Bounding box coordinates [x1, y1, x2, y2]
+            frame: Current video frame
+            timestamp: Current time in seconds (default: current time)
+
+        Returns:
+            tuple: (speed_violation_flag, speed_in_kmh)
+        """
         x1, y1, x2, y2 = map(int, bbox)
         x_center = (x1 + x2) / 2
         y_center = (y1 + y2) / 2
         position = (x_center, y_center)
         speed_violation = False
+
+        if timestamp is None:
+            timestamp = time.time()
 
         lane = self.lane_manager.get_lane(position)
 
@@ -55,34 +98,18 @@ class SpeedEstimator:
             return speed_violation, 0.0
 
         transformed_point = lane.transform(np.array([[x_center, y_center]]))[0]
-        self._update_coordinates(track_id, transformed_point)
+
+        self._update_coordinates(track_id, transformed_point, timestamp)
 
         speed = self._calculate_speed(track_id)
 
         if speed > lane.speed_limit:
             self.violations_count[track_id] += 1
-            if self.violations_count[track_id] > self.fps*3:
+
+            violation_threshold = max(3, int(self.fps))
+
+            if self.violations_count[track_id] > violation_threshold:
                 self.violations_count[track_id] = 0
                 speed_violation = True
 
         return speed_violation, speed
-
-    def capture_violation(self, frame, log):
-        """Take a photo of the violation and upload it to Cloudinary"""
-        x1, y1, x2, y2 = map(int, log["ltrb"])
-
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)
-        cv2.putText(frame, f"Overspeed: {int(log['speed'])} km/h", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-        date = datetime.now().strftime('%Y-%m-%d')
-        folder_path = f"traffic/violations/speed/{date}"
-        public_id_prefix = f"{folder_path}/{log['track_id']}"
-
-        exists = self.uploader.file_exists_on_cloudinary(public_id_prefix)
-
-        if not exists:
-            timestamp = datetime.now().strftime('%H-%M-%S')
-            public_id = f"{public_id_prefix}_{timestamp}"
-            self.uploader.upload_violation(frame, public_id, folder_path)
-            print("Capture violation!")

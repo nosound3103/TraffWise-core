@@ -1,6 +1,4 @@
-import cv2
 import numpy as np
-from datetime import datetime
 from collections import deque, OrderedDict
 
 
@@ -50,8 +48,6 @@ class WrongLaneDrivingDetector:
             return "right"
         elif cross < 0:
             return "left"
-        else:
-            return "straight"
 
     def _update_position_history(self, track_id: int, position):
         """Save vehicle positions and limit the number of tracked vehicles"""
@@ -65,7 +61,7 @@ class WrongLaneDrivingDetector:
 
         self.position_histories[track_id].append(position)
 
-    def detect_violation(self, track_id, bbox, frame, speed):
+    def detect_violation(self, track_id, bbox, speed):
         """
         Determine the vehicle's movement direction and detect wrong way violations
         """
@@ -86,8 +82,8 @@ class WrongLaneDrivingDetector:
 
         direction = self._estimate_direction(self.position_histories[track_id])
         if np.linalg.norm(direction) > 1e-6:
-            if speed <= 3:
-                return wrong_way_violation, "unknown"
+            # if speed <= 3:
+            #     return wrong_way_violation, "unknown"
 
             dot_product = np.dot(direction, lane.expected_direction)
             dot_product = np.clip(dot_product, -1.0, 1.0)
@@ -110,23 +106,3 @@ class WrongLaneDrivingDetector:
 
             return wrong_way_violation, turn_type
         return wrong_way_violation, "unknown"
-
-    def capture_violation(self, frame, log):
-        """Take a photo of the violation and upload it to Cloudinary"""
-        x1, y1, x2, y2 = map(int, log["ltrb"])
-
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)
-        cv2.putText(frame, "Wrong way", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-        date = datetime.now().strftime('%Y-%m-%d')
-        folder_path = f"traffic/violations/wrong_way/{date}"
-        public_id_prefix = f"{folder_path}/{log['track_id']}"
-
-        exists = self.uploader.file_exists_on_cloudinary(public_id_prefix)
-
-        if not exists:
-            timestamp = datetime.now().strftime('%H-%M-%S')
-            public_id = f"{public_id_prefix}_{timestamp}"
-            self.uploader.upload_violation(frame, public_id, folder_path)
-            print("Capture violation!")

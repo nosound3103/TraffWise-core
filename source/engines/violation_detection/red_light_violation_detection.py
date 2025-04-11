@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import datetime
 from collections import OrderedDict
 
 
@@ -98,23 +97,3 @@ class RedLightViolationDetector:
             car_state["violated"] = True
 
         return car_state["violated"]
-
-    def capture_violation(self, frame, log):
-        """Take a photo of the violation and upload it to Cloudinary"""
-        x1, y1, x2, y2 = map(int, log["ltrb"])
-
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 10)
-        cv2.putText(frame, "RLV", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-
-        date = datetime.now().strftime('%Y-%m-%d')
-        folder_path = f"traffic/violations/rlv/{date}"
-        public_id_prefix = f"{folder_path}/{log['track_id']}"
-
-        exists = self.uploader.file_exists_on_cloudinary(public_id_prefix)
-
-        if not exists:
-            timestamp = datetime.now().strftime('%H-%M-%S')
-            public_id = f"{public_id_prefix}_{timestamp}"
-            self.uploader.upload_violation(frame, public_id, folder_path)
-            print("Capture violation!")
