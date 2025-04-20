@@ -8,7 +8,6 @@ class DeepSORT:
                  max_age=15):
 
         self.config = config
-        self.conf_threshold = config["conf_threshold"]
         self.tracker = DeepSort(
             max_age=max_age, max_iou_distance=0.90, n_init=2)
 
@@ -19,13 +18,9 @@ class DeepSORT:
         return [x1, y1, x2 - x1, y2 - y1]
 
     def extract_detections(self, boxes):
-        detections = [
-            [self.convert_box(box),
-             conf,
-             label]
-            for [label, conf, box] in boxes if conf > self.conf_threshold]
 
-        return detections
+        return [[self.convert_box(box), conf, label]
+                for [label, conf, box] in boxes]
 
     def update_tracks(self, detections, frame):
         return self.tracker.update_tracks(detections, frame=frame)

@@ -5,8 +5,8 @@ import time
 
 
 class SpeedEstimator:
-    def __init__(self, lane_manager, uploader, fps: int = 30, max_tracks: int = 50):
-        self.lane_manager = lane_manager
+    def __init__(self, road_manager, uploader, fps: int = 30, max_tracks: int = 50):
+        self.road_manager = road_manager
         self.uploader = uploader
         self.fps = fps
         self.max_tracks = max_tracks
@@ -14,6 +14,7 @@ class SpeedEstimator:
         self.timestamps = OrderedDict()
         self.violations_count = OrderedDict()
         self.max_history_seconds = 3.0
+        self.overspeed_buffer = 1
 
     def _update_coordinates(self, track_id: int, point: np.ndarray, timestamp: float):
         """
@@ -62,12 +63,12 @@ class SpeedEstimator:
         # Calculate actual elapsed time
         elapsed_time = end_time - start_time
 
-        # Avoid division by zero or unrealistic time values
-        if elapsed_time < 0.01:
-            return 0.0
-
         # Convert to km/h (distance in arbitrary units * calibration factor)
-        speed = (distance / elapsed_time) * 3.6
+        try:
+            speed = (distance / elapsed_time) * 3.6
+        except:
+            speed = 5
+
         return speed
 
     def detect_speed(self, track_id, bbox, timestamp=None) -> tuple:
@@ -81,7 +82,7 @@ class SpeedEstimator:
             timestamp: Current time in seconds (default: current time)
 
         Returns:
-            tuple: (speed_violation_flag, speed_in_kmh)
+            tuple: (speed_violation_flag, speed_in_kmh, speed_limit_in_kmh)
         """
         x1, y1, x2, y2 = map(int, bbox)
         x_center = (x1 + x2) / 2
@@ -92,18 +93,29 @@ class SpeedEstimator:
         if timestamp is None:
             timestamp = time.time()
 
-        lane = self.lane_manager.get_lane(position)
+        lane = self.road_manager.get_lane(position)
+        road = self.road_manager.get_road(position)
+        intersection = self.road_manager.get_intersection(position)
 
-        if lane is None:
-            return speed_violation, 0.0
+        if not intersection and not road:
+            return speed_violation, 0.0, 0.0
 
-        transformed_point = lane.transform(np.array([[x_center, y_center]]))[0]
+        if not lane:
+            return speed_violation, 0.0, 0.0
+
+        area = road if road else intersection
+        flag = "road" if road else "intersection"
+
+        transformed_point = area.transform(np.array([[x_center, y_center]]))[0]
 
         self._update_coordinates(track_id, transformed_point, timestamp)
 
         speed = self._calculate_speed(track_id)
 
-        if speed > lane.speed_limit:
+        speed_limit = lane.speed_limit \
+            if flag == "road" else intersection.speed_limit
+
+        if speed > speed_limit + self.overspeed_buffer:
             self.violations_count[track_id] += 1
 
             violation_threshold = max(3, int(self.fps))
@@ -112,4 +124,4 @@ class SpeedEstimator:
                 self.violations_count[track_id] = 0
                 speed_violation = True
 
-        return speed_violation, speed
+        return (speed_violation, speed, speed_limit)

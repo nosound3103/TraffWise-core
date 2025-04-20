@@ -11,5 +11,5 @@ from source.engines.detectors.vehicle_detector import VehicleDetector
 from source.engines.tracking.deepsort import DeepSORT
 from source.engines.violation_detection.wrong_lane_driving_detector import WrongLaneDrivingDetector
 from source.engines.utils.lane import Lane
-from source.engines.utils.lane_manager import LaneManager
+from source.engines.utils.road_manager import RoadManager
 from source.engines.utils.view_transformer import ViewTransformer

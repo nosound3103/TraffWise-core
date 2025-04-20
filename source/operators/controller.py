@@ -1,24 +1,21 @@
 import cv2
 import time
 import numpy as np
-import os
+import traceback
 from datetime import datetime
-from typing import Literal, Dict
+from typing import Literal
 from concurrent.futures import ThreadPoolExecutor
 
 from .adaptive_frame_skipper import AdaptiveFrameSkipper
 from ..engines import VehicleDetector, DeepSORT, RedLightViolationDetector, \
-    SpeedEstimator, WrongLaneDrivingDetector, LaneManager
+    SpeedEstimator, WrongLaneDrivingDetector, RoadManager
 from ..process import AsyncCloudinaryUploader, ViolationManager
 
 
 class Controller:
     def __init__(self,
                  config,
-                 camera_name:
-                     Literal[
-                         "1",
-                         "2"] = "1"):
+                 camera_name="1"):
         self.config = config
         self.class_names = list(config["labels"].keys())
         self.colors = [
@@ -41,46 +38,59 @@ class Controller:
         self.new_camera_name = None
         self.current_frame = None
         self.is_paused = False
-        self.current_video_position = 0
         self.video_path = None
-        self.current_cap = None
+        self.cap = None
         self.show_annotations = True
+        self.lane_annotate_enabled = True
+        self.road_annotate_enabled = True
+        self.intersection_annotate_enabled = True
         self.speed_estimation_enabled = True
         self.red_light_detection_enabled = True
         self.wrong_lane_detection_enabled = True
 
     def init_components(self):
-        self.vehicle_detector = VehicleDetector(self.config["models"])
+        self.vehicle_detector = VehicleDetector(self.config)
         self.tracker = DeepSORT(self.config)
-        self.lane_manager = LaneManager(self.config, self.camera_name)
+        self.road_manager = RoadManager(self.config, self.camera_name)
         self.rlv_detector = RedLightViolationDetector(
-            self.lane_manager, self.uploader)
+            self.road_manager, self.uploader)
         self.wrong_way = WrongLaneDrivingDetector(
-            self.lane_manager, self.uploader)
-        self.speed_estimator = SpeedEstimator(self.lane_manager, self.uploader)
+            self.road_manager, self.uploader)
+        self.speed_estimator = SpeedEstimator(self.road_manager, self.uploader)
 
     def draw_track(self, frame, log):
         violation = []
 
+        class_id_log = log["class_id"]
+        track_id_log = log["track_id"]
+        vehicle_class = self.class_names[class_id_log]
+
+        label = f"{vehicle_class}-{track_id_log}"
+
         if self.speed_estimation_enabled and log["speed_violation"]:
-            violation.append("Overspeeding")
+            violation.append("Speeding")
 
         if self.red_light_detection_enabled and log["red_light_violation"]:
-            violation.append("RLV")
+            violation.append("Red Light Violation")
 
         if self.wrong_lane_detection_enabled and log["wrong_way_violation"]:
-            violation.append("Wrong way")
+            violation.append("Wrong Way Driving")
 
         violation_text = "-".join(violation)
 
+        violation_flag = self.violation_manager.is_violated_already(label)
+
+        if not violation_text:
+            if violation_flag:
+                violation_text = violation_flag
+
         x1, y1, x2, y2 = map(int, log["ltrb"])
-        color = self.colors[log["class_id"]]
+        if violation_flag:
+            color = (0, 0, 255)  # Red color in BGR format
+        else:
+            color = self.colors[log["class_id"]]
+
         B, G, R = map(int, color)
-
-        class_id_log = log["class_id"]
-        track_id_log = log["track_id"]
-
-        label = f"{self.class_names[class_id_log]}-{track_id_log}"
 
         if self.speed_estimation_enabled:
             speed_log = int(log["speed"])
@@ -97,11 +107,22 @@ class Controller:
         cv2.putText(frame, label, (x1 + 5, y1 - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
 
-        if violation_text:
+        if violation_flag:
             cv2.rectangle(frame, (x1 - 1, y2),
                           (x1 + len(violation_text) * 12, y2 + 20), (B, G, R), -1)
             cv2.putText(frame, violation_text, (x1 + 5, y2 + 15),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+
+    def draw_road_structure(self, frame):
+        if self.lane_annotate_enabled:
+            self.road_manager.draw_lanes(frame)
+
+        if self.road_annotate_enabled:
+            self.road_manager.draw_roads(frame)
+
+        if self.intersection_annotate_enabled:
+            if self.road_manager.intersection:
+                self.road_manager.draw_intersections(frame)
 
     def process_frame(self, frame):
         """ Process frame
@@ -111,10 +132,6 @@ class Controller:
             frame_position (int, optional): Position of frame in video.
         """
 
-        if self.switch_model_flag:
-            self.vehicle_detector.switch_model(self.new_model)
-            self.switch_model_flag = False
-
         current_timestamp = time.time()
 
         boxes = self.vehicle_detector.detect(frame)
@@ -123,8 +140,7 @@ class Controller:
 
         violation_frame = frame.copy()
 
-        if hasattr(self, 'red_light_detection_enabled') \
-                and self.red_light_detection_enabled:
+        if self.red_light_detection_enabled:
             frame = self.rlv_detector.detect_traffic_light_color(frame)
 
         if self.show_annotations:
@@ -132,15 +148,15 @@ class Controller:
                 if not track.is_confirmed():
                     continue
                 track_id = track.track_id
+
                 ltrb = track.to_ltrb()
                 class_id = int(track.get_det_class())
-
-                speed_violation, speed = False, 0
+                speed_violation, speed, speed_limit = False, 0, 0
                 wrong_way_violation, turn_type = False, "unknown"
                 red_light_violation = False
 
                 if self.speed_estimation_enabled:
-                    speed_violation, speed = self.speed_estimator.detect_speed(
+                    speed_violation, speed, speed_limit = self.speed_estimator.detect_speed(
                         track_id, ltrb, current_timestamp)
 
                 if self.wrong_lane_detection_enabled:
@@ -156,6 +172,7 @@ class Controller:
                     ltrb=ltrb,
                     class_id=class_id,
                     speed=speed,
+                    speed_limit=speed_limit,
                     turn_type=turn_type,
                     speed_violation=speed_violation,
                     wrong_way_violation=wrong_way_violation,
@@ -166,7 +183,6 @@ class Controller:
 
                 self.draw_track(frame, log)
 
-        self.current_frame = frame
         return frame
 
     def init_process_video(self):
@@ -176,20 +192,14 @@ class Controller:
         self.update_parameters(self.params) if hasattr(self, 'params') else {}
 
         frame_size = (1280, 960)
-        cap = cv2.VideoCapture(self.video_path)
-        self.current_cap = cap
-
-        if self.current_video_position > 0:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_video_position)
+        self.cap = cv2.VideoCapture(self.video_path)
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        fps = int(self.cap.get(cv2.CAP_PROP_FPS))
         self.speed_estimator.fps = fps
         self.frame_skipper.target_fps = fps
         self.frame_skipper.fps_timer = time.time()
-        out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
-
-        return cap, out
+        self.out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
 
     def process_video(self):
         """ Process video """
@@ -259,42 +269,46 @@ class Controller:
         cv2.destroyAllWindows()
 
     def yield_from_video(self):
-        cap, _ = self.init_process_video()
-        video_fps = int(cap.get(cv2.CAP_PROP_FPS))
+        self.init_process_video()
+        video_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
 
         PAUSED_FPS = 5
         paused_sleep_time = 1.0/PAUSED_FPS
 
         while True:
             if self.switch_camera_flag:
-                if self.current_cap:
-                    self.current_video_position = int(
-                        self.current_cap.get(cv2.CAP_PROP_POS_FRAMES))
-
-                cap.release()
                 self.camera_name = self.new_camera_name
                 self.reinitialize_camera()
-                cap, _ = self.init_process_video()
-                self.current_cap = cap
+                self.init_process_video()
                 self.switch_camera_flag = False
                 print(f"Camera switched to {self.camera_name}")
 
+                self.current_frame = self.cap.read()[1]
                 self.frame_skipper.fps_timer = time.time()
                 self.frame_skipper.frame_counter = 0
                 self.frame_skipper.total_skip_frames = 0
+
+            if self.switch_model_flag:
+                self.vehicle_detector.switch_model(self.new_model)
+                self.switch_model_flag = False
 
             # Handle pause state
             if self.is_paused:
                 if hasattr(self, 'current_frame') and self.current_frame is not None:
                     # Add pause indicator text
-                    paused_frame = self.current_frame.copy()
+
+                    if self.show_annotations:
+                        paused_frame = self.current_frame.copy()
+                        self.draw_road_structure(paused_frame)
+                    else:
+                        paused_frame = self.frame_origin
+
                     cv2.putText(paused_frame, "PAUSED", (paused_frame.shape[1]//2 - 100, 50),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
 
                     _, jpeg = cv2.imencode(".jpg", paused_frame)
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-                    # Use much lower frame rate when paused to reduce resource usage
                     time.sleep(paused_sleep_time)
                     continue
                 else:
@@ -311,19 +325,25 @@ class Controller:
             # Normal video processing when not paused
             process_start_time = time.time()  # Track when we start processing
 
-            ret, frame = cap.read()
-
-            # Get current position
-            current_position = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-            self.current_video_position = current_position
+            ret, frame = self.cap.read()
 
             if not ret:
-                print("End of video or error reading frame.")
-                # Reset to beginning of video
-                cap.release()
-                cap, _ = self.init_process_video()
-                self.current_cap = cap
-                continue
+                print("End of video - restarting from beginning")
+                # Close the current capture and reinitialize
+                self.cap.release()
+                self.cap = cv2.VideoCapture(self.video_path)
+
+                # Reset video counters/timers
+                self.frame_skipper.fps_timer = time.time()
+                self.frame_skipper.frame_counter = 0
+
+                # Get first frame after resetting
+                ret, frame = self.cap.read()
+                if not ret:
+                    print("Error reading first frame after reset")
+                    continue
+
+            self.frame_origin = frame.copy()
 
             # Check if frame should be skipped based on our adaptive pattern
             if self.frame_skipper.is_skipable():
@@ -354,13 +374,6 @@ class Controller:
                 model_text = f"Model: {self.vehicle_detector.model_type}"
                 camera_text = f"Camera: {self.camera_name}"
 
-                # if hasattr(self.frame_skipper, 'skip_pattern') and self.frame_skipper.skip_pattern:
-                #     pattern = ''.join(
-                #         map(str, self.frame_skipper.skip_pattern))
-                #     pattern_text = f"Pattern: {pattern}"
-                #     cv2.putText(frame, pattern_text, (10, 180),
-                #                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
                 cv2.putText(frame, fps_text, (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 cv2.putText(frame, skip_text, (10, 60),
@@ -372,12 +385,16 @@ class Controller:
                 cv2.putText(frame, camera_text, (10, 150),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
+                self.current_frame = frame.copy()
+
+                self.draw_road_structure(frame)
                 _, jpeg = cv2.imencode(".jpg", frame)
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
 
             except Exception as e:
                 print(f"Error processing frame: {e}")
+                traceback.print_exc()
                 blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(blank_frame, "Error processing frame", (50, 240),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
@@ -388,11 +405,6 @@ class Controller:
 
     def toggle_pause(self):
         """Toggle the pause state of the video."""
-        if self.is_paused:
-            self.frame_skipper.fps_timer = time.time()
-            self.frame_skipper.frame_counter = 0
-            self.frame_skipper.total_skip_frames = 0
-
         self.is_paused = not self.is_paused
         return self.is_paused
 
@@ -411,13 +423,12 @@ class Controller:
         """Reinitialize components when switching camera"""
         print("Reinitializing components for new camera...")
         self.frame_skipper = AdaptiveFrameSkipper(self.config["frame_skipper"])
-        self.lane_manager = LaneManager(self.config, self.camera_name)
+        self.road_manager = RoadManager(self.config, self.camera_name)
         self.rlv_detector = RedLightViolationDetector(
-            self.lane_manager, self.uploader)
+            self.road_manager, self.uploader)
         self.wrong_way = WrongLaneDrivingDetector(
-            self.lane_manager, self.uploader)
-        self.speed_estimator = SpeedEstimator(self.lane_manager, self.uploader)
-        self.tracker = DeepSORT(self.config)
+            self.road_manager, self.uploader)
+        self.speed_estimator = SpeedEstimator(self.road_manager, self.uploader)
 
     def toggle_annotations(self, show_annotations):
         """
@@ -476,84 +487,69 @@ class Controller:
             print(f"Error getting current frame: {str(e)}")
             return None
 
-    def update_parameters(self, params):
-        """
-        Update system parameters based on frontend settings
-
-        Args:
-            params (dict): Dictionary of parameters from frontend
-        """
-
+    def update_speed_limit(self, road_id, speed_limit, lane_id=None):
+        """Update speed limit for a road or specific lane"""
         try:
+            if road_id == "intersection":
+                self.road_config["roads"]["intersection"]["speed_limit"] = speed_limit
+            elif lane_id:
+                self.road_config["roads"][road_id][lane_id]["speed_limit"] = speed_limit
+        except Exception as e:
+            print(f"Error updating speed limit: {e}")
 
+    def update_parameters(self, params):
+        """Update system parameters based on frontend settings"""
+        try:
             self.params = params
 
-            # Update parameters with proper type checking
-            if "speedEstimationEnabled" in params:
-                self.speed_estimation_enabled = bool(
-                    params["speedEstimationEnabled"])
-                print(
-                    f"Speed estimation enabled: {self.speed_estimation_enabled}")
+            # General settings
+            if "general_setting" in params:
+                general = params["general_setting"]
+                self.vehicle_detector.conf_threshold = general["conf_threshold"]
+                self.vehicle_detector.iou_threshold = general["iou_threshold"]
+                # Store annotation settings
+                self.lane_annotate_enabled = general["lane_annotate_enabled"]
+                self.road_annotate_enabled = general["road_annotate_enabled"]
+                self.intersection_annotate_enabled = general["intersection_annotate_enabled"]
 
-            if "redLightDetectionEnabled" in params:
-                self.red_light_detection_enabled = bool(
-                    params["redLightDetectionEnabled"])
-                print(
-                    f"Red light detection enabled: {self.red_light_detection_enabled}")
+            # Frame skipper
+            if "frame_skipper" in params:
+                skipper = params["frame_skipper"]
+                self.frame_skipper.target_fps = skipper["target_fps"]
+                self.frame_skipper.skip_rate = skipper["skip_rate"]
 
-            if "wrongLaneDetectionEnabled" in params:
-                self.wrong_lane_detection_enabled = bool(
-                    params["wrongLaneDetectionEnabled"])
-                print(
-                    f"Wrong lane detection enabled: {self.wrong_lane_detection_enabled}")
-            if "confidenceThreshold" in params:
-                self.config["conf_threshold"] = params["confidenceThreshold"]
-                self.tracker.conf_threshold = params["confidenceThreshold"]
+            # Speed estimation
+            if "speed_estimation" in params:
+                speed = params["speed_estimation"]
+                self.speed_estimation_enabled = speed["enabled"]
+                self.speed_estimator.overspeed_buffer = speed["over_speed_buffer"]
 
-            if "nmsThreshold" in params:
-                self.config["nms_threshold"] = params["nmsThreshold"]
+                # Update road speed limits
+                if "roads" in speed:
+                    for road_id, road_data in speed["roads"].items():
+                        if road_id == "intersection":
+                            self.road_manager.update_speed_limit(
+                                road_id, road_data["speed_limit"])
+                        else:
+                            for lane_id, lane_data in road_data.items():
+                                if lane_id.startswith("lane_"):
+                                    self.road_manager.update_speed_limit(
+                                        road_id, lane_data["speed_limit"], lane_id)
 
-            if "maxAge" in params:
-                self.tracker = DeepSORT(self.config, max_age=params["maxAge"])
+            # Red light violation
+            if "red_light_violation" in params:
+                self.red_light_detection_enabled = params["red_light_violation"]["enabled"]
 
-            if "speedEstimationEnabled" in params:
-                self.speed_estimation_enabled = params["speedEstimationEnabled"]
+            # Wrong way violation
+            if "wrong_way_violation" in params:
+                wrong_way = params["wrong_way_violation"]
+                self.wrong_lane_detection_enabled = wrong_way["enabled"]
+                self.wrong_way.angle_threshold = wrong_way["angle_threshold"]
+                self.wrong_way.straight_threshold = wrong_way["straight_threshold"]
+                self.wrong_way.dot_threshold = wrong_way["dot_threshold"]
+                self.wrong_way.tolerance_time = wrong_way["tolerance_time"]
 
-            if "speedLimit" in params:
-                for lane in self.lane_manager.lanes:
-                    lane.speed_limit = params["speedLimit"]
-                print(params["speedLimit"])
-
-            if "overspeedBuffer" in params:
-                self.speed_estimator.overspeed_buffer = params["overspeedBuffer"]
-
-            if "maxHistorySeconds" in params:
-                self.speed_estimator.max_history_seconds = params["maxHistorySeconds"]
-
-            if "redLightDetectionEnabled" in params:
-                self.red_light_detection_enabled = params["redLightDetectionEnabled"]
-
-            if "maxTrackRLV" in params:
-                self.rlv_detector = RedLightViolationDetector(
-                    self.lane_manager, self.uploader, max_track=params["maxTrackRLV"])
-
-            if "wrongLaneDetectionEnabled" in params:
-                self.wrong_lane_detection_enabled = params["wrongLaneDetectionEnabled"]
-
-            if "angleThreshold" in params \
-                    or "straightThreshold" in params \
-                    or "dotThreshold" in params \
-                    or "toleranceTime" in params:
-                self.wrong_way = WrongLaneDrivingDetector(
-                    self.lane_manager,
-                    self.uploader,
-                    angle_threshold=params.get("angleThreshold", 90),
-                    straight_threshold=params.get("straightThreshold", 30),
-                    dot_threshold=params.get("dotThreshold", -0.5),
-                    fps=self.wrong_way.fps
-                )
-                if "toleranceTime" in params:
-                    self.wrong_way.fps = self.speed_estimator.fps
+            print("Parameters updated successfully")  # Debug log
 
         except Exception as e:
             print(f"Error in update_parameters: {str(e)}")
@@ -567,29 +563,21 @@ class Controller:
             log (dict): The tracking and violation data dictionary
             frame (np.ndarray): The current video frame for capturing evidence
         """
-
         # Handle speed violation
         if self.speed_estimation_enabled \
                 and log["speed_violation"]:
-            lane = self.lane_manager.get_lane(
-                ((log["ltrb"][0] + log["ltrb"][2]) / 2,
-                 (log["ltrb"][1] + log["ltrb"][3]) / 2)
+
+            speed = int(log["speed"])
+            speed_limit = int(log["speed_limit"])
+            details = f"{speed} km/h (Limit: {speed_limit} km/h)"
+            image_url = self.capture_violation(frame.copy(), log, "speed")
+            self.violation_manager.add_violation(
+                log=log,
+                violation_type="speed",
+                location=f"Camera {self.camera_name}",
+                details=details,
+                image_url=image_url
             )
-
-            if lane:
-                speed_limit = lane.speed_limit
-                speed = int(log["speed"])
-                details = f"{speed} km/h (Limit: {speed_limit} km/h)"
-
-                image_url = self.capture_violation(frame.copy(), log, "speed")
-
-                self.violation_manager.add_violation(
-                    log=log,
-                    violation_type="speed",
-                    location=f"Camera {self.camera_name}",
-                    details=details,
-                    image_url=image_url
-                )
 
         # Handle red light violation
         if self.red_light_detection_enabled \
@@ -729,4 +717,60 @@ class Controller:
 
         except Exception as e:
             print(f"Error processing violation image: {e}")
+            return None
+
+    def get_system_config(self):
+        """Get current system configuration"""
+        try:
+            # Get road configuration from road manager
+            road_config = self.road_manager.road_config
+            road_speed_settings = {}
+
+            # Dynamically build road speed settings
+            for road_id, road_data in road_config.items():
+                if road_id == "intersection":
+                    road_speed_settings[road_id] = {
+                        "speed_limit": self.road_manager.get_speed_limit("intersection")
+                    }
+                else:
+                    road_speed_settings[road_id] = {}
+                    # Get lanes if they exist
+                    lanes = {k: v for k, v in road_data.items()
+                             if k.startswith("lane_")}
+                    for lane_id in lanes:
+                        road_speed_settings[road_id][lane_id] = {
+                            "speed_limit": self.road_manager.get_speed_limit(road_id, lane_id)
+                        }
+
+            return {
+                "general_setting": {
+                    "conf_threshold": self.vehicle_detector.conf_threshold,
+                    "iou_threshold": self.vehicle_detector.iou_threshold,
+                    "lane_annotate_enabled": self.lane_annotate_enabled,
+                    "road_annotate_enabled": self.road_annotate_enabled,
+                    "intersection_annotate_enabled": self.intersection_annotate_enabled
+                },
+                "frame_skipper": {
+                    "target_fps": self.frame_skipper.target_fps,
+                    "skip_rate": self.frame_skipper.skip_rate
+                },
+                "speed_estimation": {
+                    "roads": road_speed_settings,
+                    "enabled": self.speed_estimation_enabled,
+                    "over_speed_buffer": self.speed_estimator.overspeed_buffer
+                },
+                "red_light_violation": {
+                    "enabled": self.red_light_detection_enabled
+                },
+                "wrong_way_violation": {
+                    "enabled": self.wrong_lane_detection_enabled,
+                    "angle_threshold": self.wrong_way.angle_threshold,
+                    "straight_threshold": self.wrong_way.straight_threshold,
+                    "dot_threshold": self.wrong_way.dot_threshold,
+                    "tolerance_time": self.wrong_way.tolerance_time
+                }
+            }
+
+        except Exception as e:
+            print(f"Error getting system config: {e}")
             return None

@@ -5,7 +5,7 @@ class AdaptiveFrameSkipper:
     def __init__(self, config):
         self.target_fps = config.get("target_fps", 20)
 
-        self.max_skip_rate = config.get("max_skip_rate", 10)
+        self.skip_rate = config.get("skip_rate", "auto")
         self.fps_timer = time.time()
         self.frame_time = time.time()
 
@@ -56,7 +56,10 @@ class AdaptiveFrameSkipper:
                 f"Processing all frames - can achieve {max_possible_fps:.1f} FPS")
             return
 
-        ratio = video_fps / max_possible_fps
+        if self.skip_rate == "auto":
+            ratio = int(video_fps / max_possible_fps) + 1
+        else:
+            ratio = int(self.skip_rate)
 
         pattern = []
 
@@ -64,21 +67,13 @@ class AdaptiveFrameSkipper:
         kept_frames = max(int(total_pattern_frames / ratio), 1)
 
         for i in range(total_pattern_frames):
-            if i % (total_pattern_frames / kept_frames) < 1.0:
+            if i % int(total_pattern_frames / kept_frames) == 0:
                 pattern.append(0)  # Keep this frame
             else:
                 pattern.append(1)  # Skip this frame
 
         self.skip_pattern = pattern
         self.pattern_position = 0
-
-        # kept = pattern.count(0)
-        # total = len(pattern)
-        # effective_fps = (video_fps * kept) / total
-
-        # print(f"New skip pattern: keeping {kept}/{total} frames")
-        # print(f"Pattern: {pattern}")
-        # print(f"Expected effective FPS: {effective_fps:.1f}")
 
     def adjust_skip_rate(self, processing_time, video_fps):
         """

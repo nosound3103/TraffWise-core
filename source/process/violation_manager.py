@@ -22,18 +22,18 @@ class ViolationManager:
         violation_type_map = {
             "speed": "Speeding",
             "rlv": "Red Light Violation",
-            "wrong_way": "Wrong Lane Driving"
+            "wrong_way": "Wrong Way Driving"
         }
 
         track_id = log["track_id"]
         vehicle_class = self.class_names[log["class_id"]]
 
         # Generate a unique ID for this violation
-        violation_id = f"{violation_type}-{vehicle_class}-{track_id}-{int(time.time())}"
+        violation_id = f"{vehicle_class}-{track_id}-{int(time.time())}"
 
         # Check if this violation has already been recorded for this track
         for violation in self.violations:
-            if violation["id"].startswith(f"{violation_type}-{vehicle_class}-{track_id}"):
+            if violation["id"].startswith(f"{vehicle_class}-{track_id}"):
                 # Only record one violation per track per type
                 return
 
@@ -86,4 +86,10 @@ class ViolationManager:
         for violation in self.violations:
             if violation["id"] == violation_id:
                 return violation
+        return None
+
+    def is_violated_already(self, violation_id):
+        for violation in self.violations:
+            if violation["id"].startswith(violation_id):
+                return violation["type"]
         return None

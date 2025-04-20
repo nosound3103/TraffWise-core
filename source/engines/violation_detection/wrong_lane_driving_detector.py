@@ -3,14 +3,18 @@ from collections import deque, OrderedDict
 
 
 class WrongLaneDrivingDetector:
-    """
-    This class detects vehicles moving in the wrong direction (wrong way) and determines the movement direction (straight, left, right)  
-    based on a combination of the direction vector and the angle difference between the estimated movement direction  
-    and the expected lane direction.
-    """
-
-    def __init__(self, lane_manager, uploader, window_size=5, angle_threshold=90, straight_threshold=30, dot_threshold=-0.5, max_tracks=50, fps=30):
-        self.lane_manager = lane_manager
+    def __init__(
+            self,
+            road_manager,
+            uploader,
+            window_size=5,
+            angle_threshold=90,
+            straight_threshold=30,
+            dot_threshold=-0.5,
+            max_tracks=50,
+            fps=30,
+            tolerance_time=3):
+        self.road_manager = road_manager
         self.uploader = uploader
         self.max_tracks = max_tracks
         self.window_size = window_size
@@ -18,12 +22,14 @@ class WrongLaneDrivingDetector:
         self.straight_threshold = straight_threshold
         self.dot_threshold = dot_threshold
         self.fps = fps
+        self.tolerance_time = tolerance_time  # seconds
         self.position_histories = OrderedDict()
         self.violations_count = OrderedDict()
 
     def _estimate_direction(self, points):
         """
-        Estimate the average movement direction based on a sliding window of positions.
+        Estimate the average movement direction
+        based on a sliding window of positions.
         """
         if len(points) < 2:
             return np.array([0.0, 0.0])
@@ -35,7 +41,8 @@ class WrongLaneDrivingDetector:
 
     def classify_turn(self, expected, estimated):
         """
-        Compute the cross product and angle between the estimated movement vector and the expected direction vector.
+        Compute the cross product and angle between
+        the estimated movement vector and the expected direction vector.
         """
         cross = expected[0] * estimated[1] - expected[1] * estimated[0]
         dot = np.dot(expected, estimated)
@@ -63,7 +70,8 @@ class WrongLaneDrivingDetector:
 
     def detect_violation(self, track_id, bbox, speed):
         """
-        Determine the vehicle's movement direction and detect wrong way violations
+        Determine the vehicle's movement direction
+        and detect wrong way violations
         """
         x1, y1, x2, y2 = map(int, bbox)
         x_center = (x1 + x2) / 2
@@ -73,36 +81,39 @@ class WrongLaneDrivingDetector:
 
         self._update_position_history(track_id, position)
 
-        lane = self.lane_manager.get_lane(position)
+        lane = self.road_manager.get_lane(position)
         if lane is None:
-            return wrong_way_violation, "unknown"
+            intersection = self.road_manager.get_intersection(position)
+            if intersection is None:
+                return wrong_way_violation, "unknown"
 
         if len(self.position_histories[track_id]) < 2:
             return wrong_way_violation, "unknown"
 
         direction = self._estimate_direction(self.position_histories[track_id])
         if np.linalg.norm(direction) > 1e-6:
-            # if speed <= 3:
-            #     return wrong_way_violation, "unknown"
+            if 0 < speed <= 3:
+                return wrong_way_violation, "unknown"
 
-            dot_product = np.dot(direction, lane.expected_direction)
+            dot_product = np.dot(direction, lane.direction)
             dot_product = np.clip(dot_product, -1.0, 1.0)
             angle_diff = np.degrees(np.arccos(dot_product))
-            turn_type = self.classify_turn(lane.expected_direction, direction)
+            turn_type = self.classify_turn(lane.direction, direction)
 
             # Check intersection
-            if self.lane_manager.is_point_in_intersection(position):
+            if self.road_manager.get_intersection(position):
                 return wrong_way_violation, turn_type
 
             # Check wrong way
-            if dot_product < self.dot_threshold or angle_diff > self.angle_threshold:
+            if dot_product < self.dot_threshold \
+                    or angle_diff > self.angle_threshold:
                 turn_type = self.classify_turn(
-                    lane.expected_direction[::-1], direction)
-                if speed > 3:
-                    self.violations_count[track_id] += 1
-                    if self.violations_count[track_id] > self.fps*3:
-                        self.violations_count[track_id] = 0
-                        wrong_way_violation = True
+                    lane.direction[::-1], direction)
+
+                self.violations_count[track_id] += 1
+                if self.violations_count[track_id] > self.fps * self.tolerance_time:
+                    self.violations_count[track_id] = 0
+                    wrong_way_violation = True
 
             return wrong_way_violation, turn_type
         return wrong_way_violation, "unknown"
