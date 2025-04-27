@@ -185,7 +185,7 @@ class RoadManager:
     def draw_lanes(self, frame):
         """Draw lane annotations"""
         for road in self.roads:
-            for lane in road.lanes:
+            for i, lane in enumerate(road.lanes):
                 # Draw lane boundaries
                 pts = lane.coordinates.reshape((-1, 1, 2)).astype(np.int32)
                 cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
@@ -194,11 +194,19 @@ class RoadManager:
                     mid_point = np.mean(pts, axis=0)[0].astype(np.int32)
                     direction = lane.direction
                     end_point = (
-                        int(mid_point[0] + direction[0]),
-                        int(mid_point[1] + direction[1])
+                        int(mid_point[0] + direction[0] * 100),
+                        int(mid_point[1] + direction[1] * 100)
                     )
+
+                    cv2.putText(frame, f"Lane {i + 1}",
+                                (
+                                    int(mid_point[0] - direction[0] * 20),
+                                    int(mid_point[1] - direction[1] * 20)
+                                ),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
                     cv2.arrowedLine(frame, tuple(mid_point),
-                                    end_point, (0, 255, 0), 2)
+                                    end_point, (0, 255, 0), 5)
 
     def draw_roads(self, frame):
         """Draw road boundaries"""
@@ -208,11 +216,11 @@ class RoadManager:
             cv2.polylines(frame, [pts], True, (0, 0, 255), 2)
 
             # Draw stop areas if they exist
-            if road.stop_area is not None:
-                stop_pts = np.array(road.stop_area).reshape(
-                    (-1, 1, 2)).astype(np.int32)
-                cv2.polylines(frame, [stop_pts], True,
-                              (0, 0, 255), 2)
+            # if road.stop_area is not None:
+            #     stop_pts = np.array(road.stop_area).reshape(
+            #         (-1, 1, 2)).astype(np.int32)
+            #     cv2.polylines(frame, [stop_pts], True,
+            #                   (0, 0, 255), 2)
 
     def draw_intersections(self, frame):
         """Draw intersection areas"""

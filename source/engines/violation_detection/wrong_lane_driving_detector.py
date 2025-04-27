@@ -82,10 +82,9 @@ class WrongLaneDrivingDetector:
         self._update_position_history(track_id, position)
 
         lane = self.road_manager.get_lane(position)
-        if lane is None:
-            intersection = self.road_manager.get_intersection(position)
-            if intersection is None:
-                return wrong_way_violation, "unknown"
+        intersection = self.road_manager.get_intersection(position)
+        if lane is None or intersection:
+            return wrong_way_violation, "unknown"
 
         if len(self.position_histories[track_id]) < 2:
             return wrong_way_violation, "unknown"

@@ -15,46 +15,31 @@ models:
     iou_threshold: 0.5
   rtdetrv2:
     path: api/data/models/transformer-based/rtdetrv2-nano-resnet.pt
-    conf_threshold: 0.2
+    conf_threshold: 0.5
     iou_threshold: 0.5
   faster_rcnn:
     path: api/data/models/two-stage/faster_rcnn.pt
-    conf_threshold: 0.7
-    iou_threshold: 0.7
-  lp:
-    path: api/data/models/lp-detector/LP_best.pt
     conf_threshold: 0.5
+    iou_threshold: 0.5
 
 samples:
   "1":
-    video_path: api/data/samples/videos/LLGT_FPT.mp4
-    output_path: api/data/debug/videos/LLGT_FPT.mp4
-    annotation_path: api/data/samples/annotations/LLGT_FPT.yml
+    video_path: api/data/samples/videos/cam_1.mp4
+    output_path: api/data/debug/videos/cam_1.mp4
+    annotation_path: api/data/samples/annotations/cam_1.yml
   "2":
-    video_path: api/data/samples/videos/Traffic_VN_scaled.mp4
-    output_path: api/data/debug/videos/Traffic_VN_scaled.mp4
-    annotation_path: api/data/samples/annotations/Traffic_VN_scaled.yml
+    video_path: api/data/samples/videos/cam_2.mp4
+    output_path: api/data/debug/videos/cam_2.mp4
+    annotation_path: api/data/samples/annotations/cam_2.yml
   "3":
-    video_path: api/data/samples/videos/wronglane_and_speed_scaled.mp4
-    output_path: api/data/debug/videos/wronglane_and_speed_scaled.mp4
-    annotation_path: api/data/samples/annotations/wronglane_and_speed_scaled.yml
+    video_path: api/data/samples/videos/cam_3.mp4
+    output_path: api/data/debug/videos/cam_3.mp4
+    annotation_path: api/data/samples/annotations/cam_3.yml
   "4":
-    video_path: api/data/samples/videos/wronglane_and_speed_2_scaled.mp4
-    output_path: api/data/debug/videos/wronglane_and_speed_2_scaled.mp4
-    annotation_path: api/data/samples/annotations/wronglane_and_speed_2_scaled.yml
-  # "5":
-  #   video_path: api/data/samples/videos/wronglane_and_speed_3_scaled.mp4
-  #   output_path: api/data/debug/videos/wronglane_and_speed_3_scaled.mp4
-  #   annotation_path: api/data/samples/annotations/wronglane_and_speed_3_scaled.yml
+    video_path: api/data/samples/videos/cam_4.mp4
+    output_path: api/data/debug/videos/cam_4.mp4
+    annotation_path: api/data/samples/annotations/cam_4.yml
   "5":
-    video_path: api/data/samples/videos/PVB_Vien_Kiem_Sat_scaled.mp4
-    output_path: api/data/debug/videos/PVB_Vien_Kiem_Sat_scaled.mp4
-    annotation_path: api/data/samples/annotations/PVB_Vien_Kiem_Sat_scaled.yml
-  # "7":
-  #   video_path: api/data/samples/videos/red_light.mp4
-  #   output_path: api/data/debug/videos/red_light.mp4
-  #   annotation_path: api/data/samples/annotations/red_light.yml
-  "sample":
-    video_path: api/data/samples/videos/sample.mp4
-    output_path: api/data/debug/videos/sample.mp4
-    annotation_path: api/data/samples/annotations/new_sample_road_config.yaml
+    video_path: api/data/samples/videos/cam_5.mp4
+    output_path: api/data/debug/videos/cam_5.mp4
+    annotation_path: api/data/samples/annotations/cam_5.yml

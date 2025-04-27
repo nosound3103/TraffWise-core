@@ -51,23 +51,22 @@ class SpeedEstimator:
         if len(self.coordinates[track_id]) < 2 or len(self.timestamps[track_id]) < 2:
             return 0.0
 
-        # Use first and last position with their corresponding timestamps
-        start_pos = self.coordinates[track_id][0]
-        end_pos = self.coordinates[track_id][-1]
+        total_distance = 0.0
+        points = list(self.coordinates[track_id])
+        for i in range(len(points) - 1):
+            current_pos = np.array(points[i])
+            next_pos = np.array(points[i + 1])
+            segment_distance = np.linalg.norm(next_pos - current_pos)
+            total_distance += segment_distance
+
         start_time = self.timestamps[track_id][0]
         end_time = self.timestamps[track_id][-1]
-
-        # Calculate distance in transformed space
-        distance = np.linalg.norm(np.array(start_pos) - np.array(end_pos))
-
-        # Calculate actual elapsed time
         elapsed_time = end_time - start_time
 
-        # Convert to km/h (distance in arbitrary units * calibration factor)
         try:
-            speed = (distance / elapsed_time) * 3.6
+            speed = (total_distance / elapsed_time) * 3.6
         except:
-            speed = 5
+            speed = 10
 
         return speed
 
@@ -97,10 +96,7 @@ class SpeedEstimator:
         road = self.road_manager.get_road(position)
         intersection = self.road_manager.get_intersection(position)
 
-        if not intersection and not road:
-            return speed_violation, 0.0, 0.0
-
-        if not lane:
+        if not intersection and (not road or not lane):
             return speed_violation, 0.0, 0.0
 
         area = road if road else intersection

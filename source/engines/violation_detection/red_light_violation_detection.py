@@ -32,7 +32,6 @@ class RedLightViolationDetector:
                 road.traffic_light_status = None
                 continue
 
-            print(road.traffic_light)
             traffic_light_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             area = np.array(road.traffic_light, np.int32)
             cv2.fillPoly(traffic_light_mask, [area], 255)

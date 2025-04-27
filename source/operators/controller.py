@@ -41,9 +41,9 @@ class Controller:
         self.video_path = None
         self.cap = None
         self.show_annotations = True
-        self.lane_annotate_enabled = True
-        self.road_annotate_enabled = True
-        self.intersection_annotate_enabled = True
+        self.lane_annotate_enabled = False
+        self.road_annotate_enabled = False
+        self.intersection_annotate_enabled = False
         self.speed_estimation_enabled = True
         self.red_light_detection_enabled = True
         self.wrong_lane_detection_enabled = True
@@ -187,221 +187,157 @@ class Controller:
 
     def init_process_video(self):
         """ Initialize video processing """
-        self.video_path = self.config["samples"][self.camera_name]["video_path"]
-        output_path = self.config["samples"][self.camera_name]["output_path"]
-        self.update_parameters(self.params) if hasattr(self, 'params') else {}
 
-        frame_size = (1280, 960)
-        self.cap = cv2.VideoCapture(self.video_path)
+        try:
+            self.video_path = self.config["samples"][self.camera_name]["video_path"]
+            self.update_parameters(self.params) if hasattr(
+                self, 'params') else {}
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-        self.speed_estimator.fps = fps
-        self.frame_skipper.target_fps = fps
-        self.frame_skipper.fps_timer = time.time()
-        self.out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
+            self.cap = cv2.VideoCapture(self.video_path)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
 
-    def process_video(self):
-        """ Process video """
-        cap, out = self.init_process_video()
-        frame_size = (1280, 960)
-        count = 1
+            if not self.cap.isOpened():
+                raise Exception(f"Error opening video file: {self.video_path}")
 
-        while True:
-            if self.switch_camera_flag:
-                cap.release()
-                out.release()
-                self.camera_name = self.new_camera_name
-                self.reinitialize_camera()
-                cap, out = self.init_process_video()
-                self.switch_camera_flag = False
+            fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+            self.speed_estimator.fps = fps
+            self.frame_skipper.target_fps = fps
+            self.frame_skipper.fps_timer = time.time()
 
-            ret, frame = cap.read()
-
-            if not ret:
-                print("End of video or error reading frame.")
-                break
-
-            if self.frame_skipper.is_skipable():
-                self.frame_skipper.total_skip_frames += 1
-                self.frame_skipper.update_fps()
-                continue
-
-            frame = self.process_frame(frame)
-
-            processing_time = time.time() - self.frame_skipper.fps_timer
-            self.frame_skipper.adjust_skip_rate(processing_time)
-            self.frame_skipper.update_fps()
-
-            fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
-            skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
-            proc_text = f"Proc time: {processing_time*1000:.1f}ms"
-            model_text = f"Model: {self.vehicle_detector.model_type}"
-            camera_text = f"Camera: {self.camera_name}"
-
-            cv2.putText(frame, fps_text, (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, skip_text, (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, proc_text, (10, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, model_text, (10, 120),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, camera_text, (10, 150),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-            resized_frame = cv2.resize(frame, frame_size)
-
-            out.write(resized_frame)
-
-            cv2.imshow("Video Frame", resized_frame)
-
-            key = cv2.waitKey(1)
-            if key == ord('q'):
-                break
-            if key == ord('p'):
-                cv2.waitKey(-1)
-
-            count += 1
-
-        cap.release()
-        out.release()
-        cv2.destroyAllWindows()
+        except Exception as e:
+            print(f"Error initializing video: {str(e)}")
+            if hasattr(self, 'cap') and self.cap is not None:
+                self.cap.release()
+            raise
 
     def yield_from_video(self):
-        self.init_process_video()
-        video_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        try:
+            self.init_process_video()
+            video_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
 
-        PAUSED_FPS = 5
-        paused_sleep_time = 1.0/PAUSED_FPS
+            PAUSED_FPS = 5
+            paused_sleep_time = 1.0/PAUSED_FPS
 
-        while True:
-            if self.switch_camera_flag:
-                self.camera_name = self.new_camera_name
-                self.reinitialize_camera()
-                self.init_process_video()
-                self.switch_camera_flag = False
-                print(f"Camera switched to {self.camera_name}")
+            while True:
+                if not self.cap.isOpened():
+                    print("Video capture is not opened. Reinitializing...")
+                    self.init_process_video()
+                    continue
 
-                self.current_frame = self.cap.read()[1]
-                self.frame_skipper.fps_timer = time.time()
-                self.frame_skipper.frame_counter = 0
-                self.frame_skipper.total_skip_frames = 0
+                if self.switch_model_flag:
+                    self.vehicle_detector.switch_model(self.new_model)
+                    self.switch_model_flag = False
 
-            if self.switch_model_flag:
-                self.vehicle_detector.switch_model(self.new_model)
-                self.switch_model_flag = False
+                # Handle pause state
+                if self.is_paused:
+                    if hasattr(self, 'current_frame') and self.current_frame is not None:
+                        # Add pause indicator text
 
-            # Handle pause state
-            if self.is_paused:
-                if hasattr(self, 'current_frame') and self.current_frame is not None:
-                    # Add pause indicator text
+                        if self.show_annotations:
+                            paused_frame = self.current_frame.copy()
+                            self.draw_road_structure(paused_frame)
+                        else:
+                            paused_frame = self.frame_origin
 
-                    if self.show_annotations:
-                        paused_frame = self.current_frame.copy()
-                        self.draw_road_structure(paused_frame)
+                        cv2.putText(paused_frame, "PAUSED", (paused_frame.shape[1]//2 - 100, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+
+                        _, jpeg = cv2.imencode(".jpg", paused_frame)
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                        time.sleep(paused_sleep_time)
+                        continue
                     else:
-                        paused_frame = self.frame_origin
+                        # If no frame is available, show pause message
+                        blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(blank_frame, "Paused", (280, 240),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                        _, jpeg = cv2.imencode(".jpg", blank_frame)
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                        time.sleep(paused_sleep_time)
+                        continue
 
-                    cv2.putText(paused_frame, "PAUSED", (paused_frame.shape[1]//2 - 100, 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+                process_start_time = time.time()
 
-                    _, jpeg = cv2.imencode(".jpg", paused_frame)
+                ret, frame = self.cap.read()
+
+                if not ret:
+                    print("End of video - restarting from beginning")
+                    self.cap.release()
+                    self.cap = cv2.VideoCapture(self.video_path)
+
+                    self.frame_skipper.fps_timer = time.time()
+                    self.frame_skipper.frame_counter = 0
+
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        print("Error reading first frame after reset")
+                        continue
+
+                self.frame_origin = frame.copy()
+
+                if self.frame_skipper.is_skipable():
+                    continue
+
+                try:
+                    frame = self.process_frame(frame)
+
+                    if self.frame_skipper.frame_counter >= 5:
+                        self.speed_estimator.fps = max(
+                            1.0, self.frame_skipper.current_fps)
+
+                    processing_time = time.time() - process_start_time
+                    self.frame_skipper.adjust_skip_rate(
+                        processing_time, video_fps)
+                    self.frame_skipper.update_fps()
+
+                    if self.frame_skipper.frame_counter > 5:
+                        self.speed_estimator.fps = self.frame_skipper.current_fps
+
+                    fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
+                    skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
+                    proc_text = f"Proc time: {processing_time*1000:.1f}ms"
+                    model_text = f"Model: {self.vehicle_detector.model_type}"
+                    camera_text = f"Camera: {self.camera_name}"
+
+                    cv2.putText(frame, fps_text, (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, skip_text, (10, 60),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, proc_text, (10, 90),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, model_text, (10, 120),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, camera_text, (10, 150),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                    self.current_frame = frame.copy()
+
+                    self.draw_road_structure(frame)
+                    _, jpeg = cv2.imencode(".jpg", frame)
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-                    time.sleep(paused_sleep_time)
-                    continue
-                else:
-                    # If no frame is available, show pause message
+
+                except Exception as e:
+                    print(f"Error processing frame: {e}")
+                    traceback.print_exc()
                     blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                    cv2.putText(blank_frame, "Paused", (280, 240),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    cv2.putText(blank_frame, "Error processing frame", (50, 240),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                     _, jpeg = cv2.imencode(".jpg", blank_frame)
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-                    time.sleep(paused_sleep_time)
-                    continue
+                    time.sleep(0.5)
 
-            # Normal video processing when not paused
-            process_start_time = time.time()  # Track when we start processing
-
-            ret, frame = self.cap.read()
-
-            if not ret:
-                print("End of video - restarting from beginning")
-                # Close the current capture and reinitialize
+        except Exception as e:
+            print(f"Error in video streaming: {str(e)}")
+            if hasattr(self, 'cap') and self.cap is not None:
                 self.cap.release()
-                self.cap = cv2.VideoCapture(self.video_path)
-
-                # Reset video counters/timers
-                self.frame_skipper.fps_timer = time.time()
-                self.frame_skipper.frame_counter = 0
-
-                # Get first frame after resetting
-                ret, frame = self.cap.read()
-                if not ret:
-                    print("Error reading first frame after reset")
-                    continue
-
-            self.frame_origin = frame.copy()
-
-            # Check if frame should be skipped based on our adaptive pattern
-            if self.frame_skipper.is_skipable():
-                continue  # Skip this frame and get next one
-
-            try:
-                # Process the frame with timestamp
-                frame = self.process_frame(frame)
-
-                # Update the speed estimator's FPS to match actual processing rate
-                if self.frame_skipper.frame_counter >= 5:
-                    # Adjust the speed estimator's FPS to match the actual frame rate
-                    self.speed_estimator.fps = max(
-                        1.0, self.frame_skipper.current_fps)
-
-                # Calculate processing time and adjust skip rate
-                processing_time = time.time() - process_start_time
-                self.frame_skipper.adjust_skip_rate(processing_time, video_fps)
-                self.frame_skipper.update_fps()
-
-                if self.frame_skipper.frame_counter > 5:
-                    self.speed_estimator.fps = self.frame_skipper.current_fps
-
-                # Display stats on frame
-                fps_text = f"FPS: {self.frame_skipper.current_fps:.1f}"
-                skip_text = f"Skip: {self.frame_skipper.total_skip_frames} frames"
-                proc_text = f"Proc time: {processing_time*1000:.1f}ms"
-                model_text = f"Model: {self.vehicle_detector.model_type}"
-                camera_text = f"Camera: {self.camera_name}"
-
-                cv2.putText(frame, fps_text, (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, skip_text, (10, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, proc_text, (10, 90),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, model_text, (10, 120),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, camera_text, (10, 150),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-                self.current_frame = frame.copy()
-
-                self.draw_road_structure(frame)
-                _, jpeg = cv2.imencode(".jpg", frame)
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-
-            except Exception as e:
-                print(f"Error processing frame: {e}")
-                traceback.print_exc()
-                blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(blank_frame, "Error processing frame", (50, 240),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                _, jpeg = cv2.imencode(".jpg", blank_frame)
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-                time.sleep(0.5)
+            raise
+        finally:
+            if hasattr(self, 'cap') and self.cap is not None:
+                self.cap.release()
 
     def toggle_pause(self):
         """Toggle the pause state of the video."""
@@ -414,10 +350,26 @@ class Controller:
         self.new_model = model_type
         self.switch_model_flag = True
 
-    def switch_camera(self, camera_name: Literal["1", "2"]):
+    def switch_camera(self, camera_name):
         """Switch camera"""
-        self.new_camera_name = camera_name
-        self.switch_camera_flag = True
+        try:
+            self.new_camera_name = camera_name
+
+            self.camera_name = self.new_camera_name
+            self.reinitialize_camera()
+            self.init_process_video()
+            print(f"Camera switched to {self.camera_name}")
+
+            self.current_frame = self.cap.read()[1]
+            self.frame_skipper.fps_timer = time.time()
+            self.frame_skipper.frame_counter = 0
+            self.frame_skipper.total_skip_frames = 0
+
+            return self.get_system_config()
+
+        except Exception as e:
+            print(f"Error switching camera: {e}")
+            raise
 
     def reinitialize_camera(self):
         """Reinitialize components when switching camera"""
@@ -598,7 +550,7 @@ class Controller:
         if self.wrong_lane_detection_enabled \
                 and log["wrong_way_violation"]:
 
-            details = f"Vehicle driving in wrong direction)"
+            details = "Vehicle driving in wrong direction"
 
             image_url = self.capture_violation(frame.copy(), log, "wrong_way")
 
@@ -732,6 +684,7 @@ class Controller:
                     road_speed_settings[road_id] = {
                         "speed_limit": self.road_manager.get_speed_limit("intersection")
                     }
+                    self.intersection_annotate_enabled = True
                 else:
                     road_speed_settings[road_id] = {}
                     # Get lanes if they exist
@@ -741,6 +694,8 @@ class Controller:
                         road_speed_settings[road_id][lane_id] = {
                             "speed_limit": self.road_manager.get_speed_limit(road_id, lane_id)
                         }
+                    self.lane_annotate_enabled = True
+                    self.road_annotate_enabled = True
 
             return {
                 "general_setting": {

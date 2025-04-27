@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 class AsyncCloudinaryUploader:
     def __init__(self):
         load_dotenv()
-        self.executor = ThreadPoolExecutor(max_workers=2)  # Giới hạn số worker
+        self.executor = ThreadPoolExecutor(max_workers=2)
 
         cloudinary.config(
             cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
@@ -25,10 +25,8 @@ class AsyncCloudinaryUploader:
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp:
                 temp_filename = temp.name
 
-            # Save the frame as a JPEG file
             cv2.imwrite(temp_filename, frame)
 
-            # Upload the image to Cloudinary
             result = cloudinary.uploader.upload(
                 temp_filename,
                 public_id=public_id,
@@ -36,7 +34,6 @@ class AsyncCloudinaryUploader:
                 overwrite=True
             )
 
-            # Remove the temporary file
             os.unlink(temp_filename)
             return result
 
