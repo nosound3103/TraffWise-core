@@ -91,7 +91,7 @@ class WrongLaneDrivingDetector:
 
         direction = self._estimate_direction(self.position_histories[track_id])
         if np.linalg.norm(direction) > 1e-6:
-            if 0 < speed <= 3:
+            if 0 < speed <= 1:
                 return wrong_way_violation, "unknown"
 
             dot_product = np.dot(direction, lane.direction)

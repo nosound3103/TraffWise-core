@@ -30,6 +30,7 @@ class RedLightViolationDetector:
         for road in self.road_manager.roads:
             if not road.traffic_light:
                 road.traffic_light_status = None
+                self.is_red = None
                 continue
 
             traffic_light_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
@@ -48,14 +49,14 @@ class RedLightViolationDetector:
             stop_mask = cv2.bitwise_or(red_mask, orange_mask)
 
             frame_red = cv2.bitwise_and(stop_mask, traffic_light_mask)
-            is_red = cv2.countNonZero(frame_red) > 0
+            self.is_red = cv2.countNonZero(frame_red) > 0
 
-            road.traffic_light_status = is_red
+            road.traffic_light_status = self.is_red
 
             color = (0, 255, 0) if not road.traffic_light_status else (0, 0, 255)
             status = "GO" if not road.traffic_light_status else "STOP"
             stop_area = np.array(road.stop_area, np.int32)
-            if is_red:
+            if self.is_red:
                 cv2.polylines(frame, [stop_area],
                               isClosed=True, color=color, thickness=3)
 
@@ -75,25 +76,32 @@ class RedLightViolationDetector:
         if len(self.car_states) >= self.max_track:
             self.car_states.popitem(last=False)
 
-        x1, y1, x2, y2 = map(int, bbox)
-        center = ((x1 + x2) // 2, (y1 + y2) // 2)
-
-        road = self.road_manager.get_road(center)
-        if road is None or road.traffic_light_status is None:
-            return False
-
-        stop_area = np.array(road.stop_area, np.int32)
-
-        is_in_stop_area = cv2.pointPolygonTest(stop_area, center, False) >= 0
-
         if track_id not in self.car_states:
             self.car_states[track_id] = {
                 "in_stop_area": False, "violated": False}
 
+        x1, y1, x2, y2 = map(int, bbox)
+        center = ((x1 + x2) // 2, (y1 + y2) // 2)
+
+        road = self.road_manager.get_road(center)
+
+        if road is None or road.traffic_light_status is None:
+            is_in_stop_area = False
+
+            if self.is_red is None:
+                return False
+
+            is_red_light = self.is_red
+        else:
+            stop_area = np.array(road.stop_area, np.int32)
+
+            is_in_stop_area = cv2.pointPolygonTest(
+                stop_area, center, False) >= 0
+
+            is_red_light = road.traffic_light_status
+
         if is_in_stop_area:
             self.car_states[track_id]["in_stop_area"] = True
-
-        is_red_light = road.traffic_light_status
 
         if self.car_states[track_id]["in_stop_area"] and not is_in_stop_area and is_red_light:
             self.car_states[track_id]["violated"] = True

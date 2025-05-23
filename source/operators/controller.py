@@ -7,7 +7,7 @@ from typing import Literal
 from concurrent.futures import ThreadPoolExecutor
 
 from .adaptive_frame_skipper import AdaptiveFrameSkipper
-from ..engines import VehicleDetector, DeepSORT, RedLightViolationDetector, \
+from ..engines import VehicleDetector, LicensePlateProcessor, DeepSORT, RedLightViolationDetector, \
     SpeedEstimator, WrongLaneDrivingDetector, RoadManager
 from ..process import AsyncCloudinaryUploader, ViolationManager
 
@@ -50,6 +50,7 @@ class Controller:
 
     def init_components(self):
         self.vehicle_detector = VehicleDetector(self.config)
+        self.lp_processor = LicensePlateProcessor(self.config)
         self.tracker = DeepSORT(self.config)
         self.road_manager = RoadManager(self.config, self.camera_name)
         self.rlv_detector = RedLightViolationDetector(
@@ -507,6 +508,16 @@ class Controller:
             print(f"Error in update_parameters: {str(e)}")
             raise
 
+    def get_license_plate(self, log, frame):
+        box = map(int, log["ltrb"])
+        lp_box = self.lp_processor.detect_license_plate(frame, box)
+        plate_text = self.lp_processor.extract_text(
+            frame, lp_box)
+
+        lp_img = frame[lp_box[1]:lp_box[3], lp_box[0]:lp_box[2]]
+
+        return plate_text, lp_img
+
     def handle_violation(self, log, frame):
         """
         Handle all types of violations in one central place using the log data
@@ -523,12 +534,15 @@ class Controller:
             speed_limit = int(log["speed_limit"])
             details = f"{speed} km/h (Limit: {speed_limit} km/h)"
             image_url = self.capture_violation(frame.copy(), log, "speed")
+            plate_text, lp_img = self.get_license_plate(log, frame)
             self.violation_manager.add_violation(
                 log=log,
                 violation_type="speed",
                 location=f"Camera {self.camera_name}",
                 details=details,
-                image_url=image_url
+                image_url=image_url,
+                plate_text=plate_text,
+                lp_img=lp_img
             )
 
         # Handle red light violation
@@ -538,12 +552,15 @@ class Controller:
 
             image_url = self.capture_violation(frame.copy(), log, "rlv")
 
+            plate_text, lp_img = self.get_license_plate(log, frame)
             self.violation_manager.add_violation(
                 log=log,
                 violation_type="rlv",
                 location=f"Camera {self.camera_name}",
                 details=details,
-                image_url=image_url
+                image_url=image_url,
+                plate_text=plate_text,
+                lp_img=lp_img
             )
 
         # Handle wrong way violation
@@ -554,12 +571,16 @@ class Controller:
 
             image_url = self.capture_violation(frame.copy(), log, "wrong_way")
 
+            plate_text, lp_img = self.get_license_plate(log, frame)
+
             self.violation_manager.add_violation(
                 log=log,
                 violation_type="wrong_way",
                 location=f"Camera {self.camera_name}",
                 details=details,
-                image_url=image_url
+                image_url=image_url,
+                plate_text=plate_text,
+                lp_img=lp_img
             )
 
     def capture_violation(self, frame, log, violation_type):

@@ -6,7 +6,6 @@ labels:
 
 frame_skipper:
   target_fps: 60
-  max_skip_frames: 6
 
 models:
   yolo11:
@@ -21,25 +20,32 @@ models:
     path: api/data/models/two-stage/faster_rcnn.pt
     conf_threshold: 0.5
     iou_threshold: 0.5
+  lp_detector:
+    path: api/data/models/lp/LP_detection.pt
+    conf_threshold: 0.5
 
 samples:
   "1":
     video_path: api/data/samples/videos/cam_1.mp4
-    output_path: api/data/debug/videos/cam_1.mp4
     annotation_path: api/data/samples/annotations/cam_1.yml
   "2":
     video_path: api/data/samples/videos/cam_2.mp4
-    output_path: api/data/debug/videos/cam_2.mp4
     annotation_path: api/data/samples/annotations/cam_2.yml
   "3":
     video_path: api/data/samples/videos/cam_3.mp4
-    output_path: api/data/debug/videos/cam_3.mp4
     annotation_path: api/data/samples/annotations/cam_3.yml
   "4":
     video_path: api/data/samples/videos/cam_4.mp4
-    output_path: api/data/debug/videos/cam_4.mp4
     annotation_path: api/data/samples/annotations/cam_4.yml
   "5":
     video_path: api/data/samples/videos/cam_5.mp4
-    output_path: api/data/debug/videos/cam_5.mp4
     annotation_path: api/data/samples/annotations/cam_5.yml
+  "6":
+    video_path: api/data/samples/videos/cam_6.mp4
+    annotation_path: api/data/samples/annotations/cam_6.yml
+  "7":
+    video_path: api/data/samples/videos/cam_7.mp4
+    annotation_path: api/data/samples/annotations/cam_7.yml
+  "8":
+    video_path: api/data/samples/videos/cam_8.mp4
+    annotation_path: api/data/samples/annotations/cam_8.yml

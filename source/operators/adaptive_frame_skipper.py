@@ -57,7 +57,7 @@ class AdaptiveFrameSkipper:
             return
 
         if self.skip_rate == "auto":
-            ratio = int(video_fps / max_possible_fps) + 1
+            ratio = int(self.target_fps / max_possible_fps) + 1
         else:
             ratio = int(self.skip_rate)
 
@@ -90,7 +90,7 @@ class AdaptiveFrameSkipper:
         avg_time = sum(self.processing_times) / len(self.processing_times)
 
         if not self.skip_pattern or abs(avg_time - processing_time) > 0.01:
-            self.calculate_skip_pattern(video_fps, avg_time)
+            self.calculate_skip_pattern(self.target_fps, avg_time)
 
     def update_fps(self):
         """Update the FPS calculation"""

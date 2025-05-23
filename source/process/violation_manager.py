@@ -1,4 +1,6 @@
 import time
+import base64
+import cv2
 from datetime import datetime
 
 
@@ -7,7 +9,7 @@ class ViolationManager:
         self.violations = []
         self.class_names = class_names
 
-    def add_violation(self, log, violation_type, location, details, image_url=None):
+    def add_violation(self, log, violation_type, location, details, plate_text, lp_img, image_url=None):
         """
         Add a new violation to the violations log formatted for the frontend
 
@@ -28,24 +30,45 @@ class ViolationManager:
         track_id = log["track_id"]
         vehicle_class = self.class_names[log["class_id"]]
 
+        if lp_img.size == 0:
+            lp_img = "https://placehold.co/400x150?text=No+Plate+Image"
+        else:
+            _, buffer = cv2.imencode('.jpg', lp_img)
+            img_str = base64.b64encode(buffer).decode('utf-8')
+            lp_img = f"data:image/jpeg;base64,{img_str}"
+
         # Generate a unique ID for this violation
         violation_id = f"{vehicle_class}-{track_id}-{int(time.time())}"
 
         # Check if this violation has already been recorded for this track
-        for violation in self.violations:
+        for idx, violation in enumerate(self.violations):
             if violation["id"].startswith(f"{vehicle_class}-{track_id}"):
                 # Only record one violation per track per type
+                if self.violations[idx]["plate"] == "unknown":
+                    self.violations[idx] = {
+                        "id": violation_id,
+                        "vehicle": vehicle_class,
+                        "plate": plate_text,
+                        "type": violation_type_map.get(
+                            violation_type, violation_type),
+                        "status": "Pending",
+                        "date": datetime.now().isoformat(),
+                        "location": location,
+                        "evidence": image_url,
+                        "lp": lp_img
+                    }
                 return
 
         # Build the violation record in the format expected by the frontend
         violation = {
             "id": violation_id,
-            "plate": f"{vehicle_class}-{track_id}",
+            "plate": plate_text,
             "type": violation_type_map.get(violation_type, violation_type),
             "status": "Pending",
             "date": datetime.now().isoformat(),
             "location": location,
-            "evidence": image_url
+            "evidence": image_url,
+            "lp": lp_img
         }
 
         # Add type-specific details based on violation type
