@@ -37,14 +37,12 @@ class ViolationManager:
             img_str = base64.b64encode(buffer).decode('utf-8')
             lp_img = f"data:image/jpeg;base64,{img_str}"
 
-        # Generate a unique ID for this violation
         violation_id = f"{vehicle_class}-{track_id}-{int(time.time())}"
 
-        # Check if this violation has already been recorded for this track
         for idx, violation in enumerate(self.violations):
             if violation["id"].startswith(f"{vehicle_class}-{track_id}"):
-                # Only record one violation per track per type
-                if self.violations[idx]["plate"] == "unknown":
+                if self.violations[idx]["plate"] == "unknown" \
+                        or len(self.violations[idx]["plate"]) < 9:
                     self.violations[idx] = {
                         "id": violation_id,
                         "vehicle": vehicle_class,

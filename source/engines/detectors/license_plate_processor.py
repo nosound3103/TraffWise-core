@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import re
+import cv2
 import easyocr
 from ultralytics import YOLO
 from paddleocr import PaddleOCR
@@ -21,10 +22,18 @@ class LicensePlateProcessor:
                 "conf_threshold", 0.5)
 
         if ocr_type == "easyocr":
-            self.recognition_model = easyocr.Reader(['en'])
+            self.recognition_model = easyocr.Reader(['en'], gpu=True)
         elif ocr_type == "paddleocr":
             self.recognition_model = PaddleOCR(
-                lang="en", ocr_version="PP-OCRv4")
+                lang="en",
+                ocr_version="PP-OCRv4")
+
+    def add_padding(self, frame):
+        padded_frame = cv2.copyMakeBorder(
+            frame, 100, 100, 100, 100, cv2.BORDER_CONSTANT,
+            value=[255, 255, 255])
+
+        return padded_frame
 
     def detect_license_plate(self, frame, box):
         x1, y1, x2, y2 = box
@@ -60,24 +69,36 @@ class LicensePlateProcessor:
             results.append(lp_box)
         return results
 
-    def extract_text(self, frame, box):
-        x1, y1, x2, y2 = box
-        lp_crop = frame[y1:y2, x1:x2]
+    def extract_text(self, frame, box=None):
+        if box:
+            x1, y1, x2, y2 = box
+            lp_crop = frame[y1:y2, x1:x2]
 
-        if lp_crop.size == 0:
-            return 'unknown'
+            if lp_crop.size == 0:
+                return 'unknown', 0.0
+        else:
+            lp_crop = frame.copy()
+
+        lp_crop = self.add_padding(lp_crop)
 
         if self.ocr_type == "easyocr":
-            result = self.recognition_model.readtext(lp_crop, paragraph=True)
-            text = result[0][1] if result else 'unknown'
+            results = self.recognition_model.readtext(lp_crop)
+            text = "".join([res[1] for res in results if res[1]])
+            conf = sum([res[2] for res in results]) / \
+                len(results) if results else 0
         elif self.ocr_type == "paddleocr":
             result = self.recognition_model.predict(lp_crop)
-            text = "".join(result[0]['rec_texts'])
+            if not len(result[0]['rec_texts']):
+                return 'unknown', 0.0
 
-        if self.validate_license_plate(text):
-            return text
+            text = "".join(result[0]['rec_texts'])
+            conf = sum(result[0]['rec_scores']) / \
+                len(result[0]['rec_scores']) if result[0]['rec_scores'] else 0
+
+        if text:
+            return text, conf
         else:
-            return "unknown"
+            return "unknown", 0.0
 
     def extract_texts(self, frame, boxes):
         plate_texts = []

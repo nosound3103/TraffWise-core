@@ -50,7 +50,8 @@ class Controller:
 
     def init_components(self):
         self.vehicle_detector = VehicleDetector(self.config)
-        self.lp_processor = LicensePlateProcessor(self.config)
+        self.lp_processor = LicensePlateProcessor(
+            self.config, ocr_type="paddleocr")
         self.tracker = DeepSORT(self.config)
         self.road_manager = RoadManager(self.config, self.camera_name)
         self.rlv_detector = RedLightViolationDetector(
@@ -511,12 +512,12 @@ class Controller:
     def get_license_plate(self, log, frame):
         box = map(int, log["ltrb"])
         lp_box = self.lp_processor.detect_license_plate(frame, box)
-        plate_text = self.lp_processor.extract_text(
+        plate_text, text_conf = self.lp_processor.extract_text(
             frame, lp_box)
 
         lp_img = frame[lp_box[1]:lp_box[3], lp_box[0]:lp_box[2]]
 
-        return plate_text, lp_img
+        return plate_text, lp_img, text_conf
 
     def handle_violation(self, log, frame):
         """
@@ -534,7 +535,7 @@ class Controller:
             speed_limit = int(log["speed_limit"])
             details = f"{speed} km/h (Limit: {speed_limit} km/h)"
             image_url = self.capture_violation(frame.copy(), log, "speed")
-            plate_text, lp_img = self.get_license_plate(log, frame)
+            plate_text, lp_img, _ = self.get_license_plate(log, frame)
             self.violation_manager.add_violation(
                 log=log,
                 violation_type="speed",
@@ -552,7 +553,7 @@ class Controller:
 
             image_url = self.capture_violation(frame.copy(), log, "rlv")
 
-            plate_text, lp_img = self.get_license_plate(log, frame)
+            plate_text, lp_img, _ = self.get_license_plate(log, frame)
             self.violation_manager.add_violation(
                 log=log,
                 violation_type="rlv",
@@ -571,7 +572,7 @@ class Controller:
 
             image_url = self.capture_violation(frame.copy(), log, "wrong_way")
 
-            plate_text, lp_img = self.get_license_plate(log, frame)
+            plate_text, lp_img, _ = self.get_license_plate(log, frame)
 
             self.violation_manager.add_violation(
                 log=log,
@@ -695,11 +696,9 @@ class Controller:
     def get_system_config(self):
         """Get current system configuration"""
         try:
-            # Get road configuration from road manager
             road_config = self.road_manager.road_config
             road_speed_settings = {}
 
-            # Dynamically build road speed settings
             for road_id, road_data in road_config.items():
                 if road_id == "intersection":
                     road_speed_settings[road_id] = {
@@ -708,7 +707,6 @@ class Controller:
                     self.intersection_annotate_enabled = True
                 else:
                     road_speed_settings[road_id] = {}
-                    # Get lanes if they exist
                     lanes = {k: v for k, v in road_data.items()
                              if k.startswith("lane_")}
                     for lane_id in lanes:
